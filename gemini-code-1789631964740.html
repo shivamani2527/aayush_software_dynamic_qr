@@ -1,0 +1,3476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AyushCare - Smart QR Waiting Patient & OPD Network</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <!-- Firebase App & Realtime Database SDK CDNs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .tab-active-patient { border-bottom: 3px solid #0d9488; color: #0f766e; font-weight: 700; }
+    .tab-active-hospital { border-bottom: 3px solid #d97706; color: #b45309; font-weight: 700; }
+
+    @media print {
+      body * { visibility: hidden; }
+      #printReportSection, #printReportSection * { visibility: visible; }
+      #printReportSection {
+        position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 24px;
+        background: white; border: none !important; box-shadow: none !important;
+      }
+      .no-print { display: none !important; }
+    }
+  </style>
+  <!-- QRCode.js CDN for Verifiable Prescriptions, ABHA Health Cards & Dynamic QR Passes -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Html5-QRCode Camera Scanner CDN -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- html2pdf.js for 1-Click Medical Summary PDF Download -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
+
+  <!-- ================= REAL-TIME TOKEN ALERT BANNER ================= -->
+  <div id="liveAlertBanner" class="hidden fixed top-0 left-0 right-0 z-50 bg-amber-500 text-slate-950 px-4 py-3 shadow-xl flex items-center justify-between border-b-4 border-slate-900 animate-pulse">
+    <div class="flex items-center space-x-3 max-w-7xl mx-auto w-full">
+      <div class="bg-slate-950 text-amber-400 p-2 rounded-xl text-lg">
+        <i class="fa-solid fa-bell-concierge animate-bounce"></i>
+      </div>
+      <div class="flex-1">
+        <h4 class="font-black text-sm uppercase tracking-wide">Live OPD Token Alert (3 Tokens Ahead)</h4>
+        <p class="text-xs font-bold" id="liveAlertText">Your token is approaching soon. Please be near the chamber.</p>
+      </div>
+      <button onclick="dismissTokenAlert()" class="bg-slate-950 text-white px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-rose-700 transition">
+        Dismiss
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= AUTHENTICATION / LOGIN & SIGNUP SCREEN ================= -->
+  <div id="authScreen" class="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl p-7 md:p-8 shadow-2xl space-y-5 relative overflow-hidden border border-slate-100">
+      <div class="absolute -right-12 -top-12 w-36 h-36 bg-teal-500/10 rounded-full blur-2xl"></div>
+      
+      <!-- Brand & Header -->
+      <div class="text-center space-y-1">
+        <div class="inline-flex p-3 rounded-2xl bg-teal-50 text-teal-700 text-2xl shadow-sm mb-1">
+          <i class="fa-solid fa-hospital-user"></i>
+        </div>
+        <h2 class="text-2xl font-black text-slate-800 tracking-tight">AyushCare Portal</h2>
+        <p class="text-xs text-slate-500">Smart OPD & Electronic Clinical Intake System</p>
+      </div>
+
+      <!-- Auth Action: Login vs Signup -->
+      <div class="flex border-b border-slate-200">
+        <button type="button" onclick="setAuthTab('login')" id="tabBtnLogin" class="flex-1 pb-2.5 text-xs font-bold text-teal-700 border-b-2 border-teal-600 transition">
+          Sign In
+        </button>
+        <button type="button" onclick="setAuthTab('signup')" id="tabBtnSignup" class="flex-1 pb-2.5 text-xs font-semibold text-slate-400 hover:text-slate-700 transition">
+          Create New Account
+        </button>
+      </div>
+
+      <!-- Role Selector -->
+      <div class="grid grid-cols-2 p-1 bg-slate-100 rounded-xl text-xs font-semibold text-slate-600">
+        <button type="button" onclick="setAuthRole('patient')" id="authRolePatient" class="py-2.5 rounded-lg bg-white shadow-sm text-teal-800 font-bold transition">
+          <i class="fa-solid fa-user-circle mr-1.5"></i> Patient
+        </button>
+        <button type="button" onclick="setAuthRole('hospital')" id="authRoleHospital" class="py-2.5 rounded-lg text-slate-500 hover:text-slate-800 transition">
+          <i class="fa-solid fa-hospital mr-1.5"></i> Hospital Staff
+        </button>
+      </div>
+
+      <!-- Form Error / Feedback Banner -->
+      <div id="authAlertBox" class="hidden p-3 rounded-xl text-xs flex items-center space-x-2">
+        <i class="fa-solid fa-circle-exclamation text-base"></i>
+        <span id="authAlertText" class="font-medium"></span>
+      </div>
+
+      <!-- Auth Form -->
+      <form id="authForm" onsubmit="handleAuthSubmit(event)" class="space-y-3.5">
+        
+        <!-- Hospital Info Group -->
+        <div id="hospitalAuthGroup" class="hidden space-y-2">
+          <div class="space-y-1">
+            <label class="block text-[11px] font-bold text-slate-700">Hospital / Medical Center Name *</label>
+            <input type="text" id="authHospitalName" placeholder="Enter your Hospital Name (e.g., Apollo, AIIMS, City Hospital)" value="" class="w-full px-3.5 py-2.5 border rounded-xl text-xs bg-slate-50 focus:bg-white outline-none" />
+          </div>
+          <div class="space-y-1" id="hospLogoBox">
+            <label class="block text-[11px] font-bold text-slate-700">Hospital Logo / Photo</label>
+            <input type="file" id="authHospitalLogoInput" accept="image/*" onchange="previewHospitalLogo(event)" class="w-full text-xs text-slate-500 border p-1 rounded-xl" />
+          </div>
+        </div>
+
+        <!-- Full Name (Only for Signup) -->
+        <div id="signupNameGroup" class="hidden space-y-1">
+          <label class="block text-[11px] font-bold text-slate-700" id="nameFieldLabel">Full Name *</label>
+          <input type="text" id="authFullName" placeholder="e.g., Rahul Sharma" class="w-full px-3.5 py-2.5 border rounded-xl text-xs bg-slate-50 focus:bg-white outline-none" />
+        </div>
+
+        <div class="space-y-1">
+          <label class="block text-[11px] font-bold text-slate-700" id="authIdentifierLabel">Patient Email / ABHA ID *</label>
+          <input type="text" id="authIdentifier" required placeholder="Enter your email / ID" value="" class="w-full px-3.5 py-2.5 border rounded-xl text-xs bg-slate-50 focus:bg-white outline-none" />
+        </div>
+
+        <div class="space-y-1">
+          <label class="block text-[11px] font-bold text-slate-700">Password *</label>
+          <input type="password" id="authPassword" required placeholder="Enter your password" value="" class="w-full px-3.5 py-2.5 border rounded-xl text-xs bg-slate-50 focus:bg-white outline-none" />
+        </div>
+
+        <button type="submit" id="authSubmitBtn" class="w-full py-3 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center space-x-2">
+          <span>Sign In</span> <i class="fa-solid fa-arrow-right text-[10px]"></i>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= TOP APPLICATION HEADER ================= -->
+  <header class="bg-teal-800 text-white sticky top-0 z-40 shadow-md">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center gap-3">
+      <div class="flex items-center space-x-3">
+        <div class="bg-white text-teal-800 p-2 rounded-xl font-bold text-lg shadow">
+          <i class="fa-solid fa-notes-medical"></i>
+        </div>
+        <!-- Back Navigation Button -->
+        <button id="headerBackBtn" onclick="handleAppBack()" title="Back to previous tab / screen" class="hidden px-2.5 py-1.5 rounded-xl text-xs font-bold bg-teal-900/90 hover:bg-teal-700 text-teal-100 hover:text-white border border-teal-600 transition shadow-sm flex items-center space-x-1">
+          <i class="fa-solid fa-arrow-left"></i> <span class="hidden sm:inline">Back</span>
+        </button>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="font-bold text-base md:text-lg leading-tight" id="headerMainTitle">AyushCare OPD System</h1>
+            <span id="headerRoleBadge" class="bg-teal-950 text-teal-200 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider"></span>
+          </div>
+          <p class="text-[11px] text-teal-200" id="headerSubtitle">Patient Case-Taking & Diagnostic Vault</p>
+        </div>
+      </div>
+
+      <!-- Action Items: Advanced Hospital & System Controls -->
+      <div class="flex items-center gap-2 md:gap-3">
+        <div class="text-right hidden sm:block border-l border-teal-700 pl-2">
+          <span class="text-xs font-bold block leading-tight" id="userGreetingName">User</span>
+          <span class="text-[10px] text-teal-300" id="userGreetingRole">Logged in</span>
+        </div>
+
+        <button onclick="downloadSelf()" title="Export complete self-contained offline application" class="bg-amber-500 hover:bg-amber-600 text-slate-900 px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center shadow">
+          <i class="fa-solid fa-download mr-1"></i> <span class="hidden sm:inline">Save</span>
+        </button>
+
+        <button onclick="logoutSession()" title="Logout" class="bg-teal-950 hover:bg-rose-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1">
+          <i class="fa-solid fa-power-off"></i> <span class="hidden sm:inline">Exit</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= MAIN WORKSPACE ================= -->
+  <main class="max-w-7xl mx-auto p-4 md:p-6 flex-1 w-full space-y-6">
+
+    <!-- ============================================================= -->
+    <!--                      1. PATIENT MODE                         -->
+    <!-- ============================================================= -->
+    <div id="patientSection" class="space-y-6 hidden">
+      
+      <!-- Patient Navigation Tabs -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 flex overflow-x-auto p-1">
+        <button onclick="switchPatientTab(1)" id="ptTab1" class="tab-active-patient px-5 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-file-invoice mr-2"></i> 1. Medical Registration Form & Dynamic QR
+        </button>
+        <button onclick="switchPatientTab(2)" id="ptTab2" class="px-5 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-user-doctor mr-2"></i> 2. Book Specialist Doctor
+        </button>
+        <button onclick="switchPatientTab(3)" id="ptTab3" class="px-5 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-folder-medical mr-2"></i> 3. My Medical Reports (<span id="reportCountBadge">0</span>)
+        </button>
+        <button onclick="switchPatientTab(4)" id="ptTab4" class="px-5 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-list-ol mr-2"></i> 4. My Token Status & Alerts (<span id="patientBookingCountBadge">0</span>)
+        </button>
+      </div>
+
+      <!-- Tab 1: Comprehensive Medical Form with Full Name, Gender, Unique ID & Dynamic QR Pass -->
+      <div id="ptPage1" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Medical Form (2 Cols) -->
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          
+          <div class="bg-[#1e4d79] text-white p-4 flex justify-between items-center">
+            <h2 class="text-lg font-black tracking-wide uppercase">PATIENT MEDICAL FORM</h2>
+            <div class="flex items-center space-x-3 bg-slate-900/40 px-3 py-1.5 rounded-xl border border-white/10">
+              <img id="patientHeaderAvatar" src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80" alt="Patient Photo" class="w-10 h-10 rounded-full object-cover border-2 border-teal-400" />
+              <div class="text-right text-xs">
+                <span class="font-bold block tracking-wider text-white" id="patientProfileDisplay">Rahul Sharma</span>
+                <span class="text-teal-200 text-[10px]" id="patientIDDisplay">ID: PAT-1001</span>
+              </div>
+            </div>
+          </div>
+
+          <form id="patientForm" onsubmit="savePatientRecord(event)" class="p-6 space-y-5">
+            
+            <!-- SECTION 1: PATIENT INFORMATION -->
+            <div class="space-y-3">
+              <div class="bg-amber-500 text-slate-900 font-black text-xs px-3 py-1.5 tracking-wider uppercase rounded-sm">
+                PATIENT INFORMATION & UNIQUE ID
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Patient's Full Name *</label>
+                  <input type="text" id="pFullName" required value="" oninput="updatePatientDisplayName()" class="w-full p-2 border rounded-lg text-xs bg-slate-50 focus:bg-white focus:ring-1 focus:ring-teal-500 outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Unique Patient ID *</label>
+                  <input type="text" id="pUniqueId" required value="" readonly class="w-full p-2 border rounded-lg text-xs bg-slate-200 font-mono font-bold text-slate-700 cursor-not-allowed" />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Gender *</label>
+                  <select id="pGender" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none font-bold text-slate-850">
+                    <option selected value="">Select gender</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Age *</label>
+                  <input type="number" id="pAge" required value="" class="w-full p-2 border rounded-lg text-xs bg-slate-50 focus:bg-white outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Blood Group *</label>
+                  <select id="pBloodGroup" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none font-bold text-slate-850">
+                    <option selected value="">Select blood group</option><option>O+</option><option>O-</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Phone Number *</label>
+                  <input type="tel" id="pPhone" required value="" class="w-full p-2 border rounded-lg text-xs bg-slate-50 focus:bg-white outline-none" />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Date of Birth</label>
+                  <input type="date" id="pDOB" value="" class="w-full p-2 border rounded-lg text-xs bg-slate-50 focus:bg-white outline-none" />
+                </div>
+                <div class="md:col-span-2">
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Email Address *</label>
+                  <input type="email" id="pEmail" required value="" class="w-full p-2 border rounded-lg text-xs bg-slate-50 focus:bg-white outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <!-- SECTION 2: EMERGENCY CONTACT INFORMATION -->
+            <div class="space-y-3">
+              <div class="bg-amber-500 text-slate-900 font-black text-xs px-3 py-1.5 tracking-wider uppercase rounded-sm">
+                EMERGENCY CONTACT INFORMATION
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Name *</label>
+                  <input type="text" id="pEmergName" required value="Sunita Sharma" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Relationship *</label>
+                  <input type="text" id="pEmergRel" required value="Spouse" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Phone Number *</label>
+                  <input type="tel" id="pEmergPhone" required value="+91 91234 56789" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <!-- SECTION 3: INSURANCE INFORMATION -->
+            <div class="space-y-3">
+              <div class="bg-amber-500 text-slate-900 font-black text-xs px-3 py-1.5 tracking-wider uppercase rounded-sm">
+                INSURANCE INFORMATION
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Insurance Provider</label>
+                  <input type="text" id="pInsuranceProv" value="Star Health / National Ayush Scheme" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-1">Policy Number / ABHA ID</label>
+                  <input type="text" id="pPolicyNum" value="ABHA-9821-4402-1189" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <!-- SECTION 4: MEDICAL HISTORY -->
+            <div class="space-y-3">
+              <div class="bg-amber-500 text-slate-900 font-black text-xs px-3 py-1.5 tracking-wider uppercase rounded-sm">
+                MEDICAL HISTORY
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label class="block text-[11px] font-bold text-slate-700 mb-2">Pre-existing Conditions (Check all that apply)</label>
+                  <div class="space-y-1.5 text-xs">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                      <input type="checkbox" id="condDiabetes" class="rounded text-teal-600" />
+                      <span>Diabetes</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                      <input type="checkbox" id="condHypertension" checked class="rounded text-teal-600" />
+                      <span>Hypertension</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                      <input type="checkbox" id="condAsthma" class="rounded text-teal-600" />
+                      <span>Asthma</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                      <input type="checkbox" id="condCancer" class="rounded text-teal-600" />
+                      <span>Cancer</span>
+                    </label>
+                    <div class="flex items-center space-x-2 pt-1">
+                      <label class="flex items-center space-x-2 cursor-pointer whitespace-nowrap">
+                        <input type="checkbox" id="condOtherCheck" class="rounded text-teal-600" />
+                        <span>Other:</span>
+                      </label>
+                      <input type="text" id="condOtherText" placeholder="Specify condition" class="w-full p-1 border rounded text-xs" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="space-y-3">
+                  <div>
+                    <label class="block text-[11px] font-bold text-slate-700 mb-1">Known Allergies:</label>
+                    <input type="text" id="pAllergiesList" value="Penicillin, Sulfa drugs" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none" />
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-bold text-slate-700 mb-1">Active Medications:</label>
+                    <input type="text" id="pMedicationsList" value="Amlodipine 5mg (OD)" class="w-full p-2 border rounded-lg text-xs bg-slate-50 outline-none" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SECTION 5: PURPOSE OF VISIT / DISEASE -->
+            <div class="space-y-2">
+              <div class="bg-amber-500 text-slate-900 font-black text-xs px-3 py-1.5 tracking-wider uppercase rounded-sm">
+                DIAGNOSIS / DISEASE / REASON FOR VISIT
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-700 mb-1">Describe symptoms, suspected disease or reason for visit *</label>
+                <textarea id="pVisitReason" required rows="3" class="w-full p-2.5 border rounded-lg text-xs bg-slate-50 outline-none focus:bg-white" placeholder="e.g. Chronic Sciatica / Lumbar Spondylosis with lower back radiation...">Chronic Lumbar Spondylosis with Lower Back Nerve Compression</textarea>
+              </div>
+            </div>
+
+            <button type="submit" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-xl text-xs shadow-md transition flex items-center justify-center space-x-2">
+              <i class="fa-solid fa-floppy-disk"></i> <span>Save Patient Record & Update Live Dynamic QR Pass</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- Live Dynamic QR Pass Card (1 Col) -->
+        <div class="space-y-4">
+          <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center space-y-4">
+            <div>
+              <span class="bg-teal-100 text-teal-800 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full">Touchless Fast-Track OPD</span>
+              <h3 class="font-black text-slate-800 text-base mt-2">Live Dynamic QR Pass</h3>
+              <p class="text-xs text-slate-500">Present this QR code at hospital intake for instant scanner recognition.</p>
+            </div>
+            
+            <div id="qrcodeBox" class="p-4 bg-white border-2 border-teal-500 rounded-2xl shadow-sm min-h-[190px] flex items-center justify-center"></div>
+
+            <div id="qrMeta" class="text-xs text-slate-600 w-full bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+              <p class="font-bold text-slate-800" id="qrPatientTag">Rahul Sharma</p>
+              <p class="text-[10px] text-slate-400 font-mono" id="qrTimestampTag">Ready for Hospital Scan</p>
+            </div>
+            <button onclick="generatePatientQR()" class="w-full bg-slate-800 hover:bg-slate-900 text-white py-2.5 rounded-xl text-xs font-bold transition">
+              Refresh Dynamic QR Pass
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Doctor Directory & Appointments across All Specialties & Hospitals -->
+      <div id="ptPage2" class="space-y-4 hidden">
+        <div class="flex flex-col md:flex-row justify-between md:items-center gap-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+          <div>
+            <h2 class="font-bold text-slate-800 text-base">Book a Specialist (Cross-Hospital Directory)</h2>
+            <p class="text-xs text-slate-500">Browse doctors from different hospitals by specialty and check live availability.</p>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <!-- Filter by Department -->
+            <select id="filterDepartment" onchange="renderPatientDoctors()" class="border p-2 rounded-xl text-xs bg-slate-50 outline-none font-medium">
+              <option value="All">All Specialties / Departments</option>
+              <option value="General Practice">General Practice</option>
+              <option value="Gastroenterology">Gastroenterology</option>
+              <option value="Cardiology">Cardiology</option>
+              <option value="Pediatrics">Pediatrics</option>
+              <option value="Endocrinology">Endocrinology</option>
+              <option value="Orthopedic">Orthopedic</option>
+              <option value="Pathology">Pathology</option>
+              <option value="Radiology">Radiology</option>
+              <option value="Psychiatry">Psychiatry</option>
+              <option value="Ophthalmology">Ophthalmology</option>
+              <option value="Neurology">Neurology</option>
+              <option value="Pulmonology">Pulmonology</option>
+              <option value="Otolaryngology (ENT)">Otolaryngology (ENT)</option>
+              <option value="Urology">Urology</option>
+              <option value="Kayachikitsa (Internal Med)">Kayachikitsa (Ayurveda)</option>
+              <option value="Panchakarma">Panchakarma</option>
+            </select>
+
+            <!-- Filter by Hospital -->
+            <select id="filterHospital" onchange="renderPatientDoctors()" class="border p-2 rounded-xl text-xs bg-slate-50 outline-none font-medium">
+              <option value="All">All Hospitals</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Doctors Grid -->
+        <div id="patientDoctorsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </div>
+
+      <!-- Tab 3: Medical Reports Vault -->
+      <div id="ptPage3" class="space-y-4 hidden">
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div class="flex flex-col md:flex-row justify-between md:items-center gap-2 border-b pb-4">
+            <div>
+              <h2 class="font-bold text-slate-800 text-base flex items-center">
+                <i class="fa-solid fa-folder-open text-teal-600 mr-2"></i> Patient Medical Vault (Diagnostic & Scan Reports)
+              </h2>
+              <p class="text-xs text-slate-500">Official lab & radiology results uploaded directly by hospital departments. View or download directly to eliminate physical paper reports.</p>
+            </div>
+            <button onclick="renderPatientReports()" class="self-start md:self-auto bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl transition flex items-center">
+              <i class="fa-solid fa-arrows-rotate mr-1.5"></i> Refresh Vault
+            </button>
+          </div>
+
+          <div id="patientReportsContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+        </div>
+      </div>
+
+      <!-- Tab 4: Patient View Booked Appointments & Tokens -->
+      <div id="ptPage4" class="space-y-4 hidden">
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h2 class="font-bold text-slate-800 text-base">My Booked Specialist Appointments & Token Status</h2>
+              <p class="text-xs text-slate-500">View issued token numbers starting from 001, live queue status, and real-time alerts.</p>
+            </div>
+          </div>
+          <div class="overflow-x-auto rounded-xl border border-slate-200">
+            <table class="w-full text-left text-xs text-slate-600">
+              <thead class="bg-slate-100 text-slate-800 uppercase text-[11px] font-bold">
+                <tr>
+                  <th class="p-3">Token No.</th>
+                  <th class="p-3">Hospital & Department</th>
+                  <th class="p-3">Specialist Doctor</th>
+                  <th class="p-3">Slot / Date</th>
+                  <th class="p-3 text-center">Queue Status</th>
+                </tr>
+              </thead>
+              <tbody id="patientAppointmentsBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ============================================================= -->
+    <!--                     2. HOSPITAL MODE                         -->
+    <!-- ============================================================= -->
+    <div id="hospitalSection" class="space-y-6 hidden">
+      
+      <!-- Hospital Mode Top Banner -->
+      <div class="bg-amber-500 text-slate-950 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-sm">
+        <div class="flex items-center space-x-3">
+          <img id="hospitalBannerLogo" src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=120&auto=format&fit=crop&q=80" alt="Hospital Logo" class="w-12 h-12 rounded-xl object-cover border-2 border-slate-950 bg-white" />
+          <div>
+            <h3 class="text-sm font-black uppercase tracking-wider" id="hospitalModeBannerTitle">HOSPITAL OPD DESK</h3>
+            <p class="text-xs text-slate-900 font-medium">Smart Clinical Triage, Camera QR Ingestion & Token Management</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2"></div>
+      </div>
+
+      <!-- Hospital Navigation Tabs -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 flex overflow-x-auto p-1">
+        <button onclick="switchHospitalTab('ingestion')" id="hospTabIngestion" class="tab-active-hospital px-4 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-qrcode mr-2"></i> 1. Live Camera QR Intake
+        </button>
+        <button onclick="switchHospitalTab('bookings')" id="hospTabBookings" class="px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-list-ol mr-2"></i> 2. Token Queue & Triage (<span id="hospitalBookingsBadge">0</span>)
+        </button>
+        <button onclick="switchHospitalTab('logs')" id="hospTabLogs" class="px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-table-list mr-2"></i> 3. OPD Logs (<span id="totalLogsBadge">0</span>)
+        </button>
+        <button onclick="switchHospitalTab('summary')" id="hospTabSummary" class="px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-print mr-2"></i> 4. Print Summary
+        </button>
+        <button onclick="switchHospitalTab('doctors')" id="hospTabDoctors" class="px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl">
+          <i class="fa-solid fa-user-doctor mr-2"></i> 5. Doctor Roster (<span id="rosterCountBadge">0</span>)
+        </button>
+      </div>
+
+      <!-- Hospital Tab 1: Camera QR Scanner Patient Intake -->
+      <div id="hospPageIngestion" class="space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          <!-- Live QR Scanner & Intake (Full width since waiting patients widget removed) -->
+          <div class="lg:col-span-3 space-y-6">
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <div class="flex flex-col md:flex-row justify-between md:items-center gap-3">
+                <div>
+                  <h3 class="font-bold text-slate-800 text-sm md:text-base flex items-center">
+                    <i class="fa-solid fa-camera text-teal-600 mr-2"></i> Live Camera & Image File QR Scanner
+                  </h3>
+                  <p class="text-xs text-slate-500">Scan via video stream or upload a QR image file for instant patient triage.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" onclick="toggleLiveCameraScanner()" id="btnToggleCamera" class="bg-teal-700 hover:bg-teal-800 text-white font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center space-x-1 transition">
+                    <i class="fa-solid fa-video"></i> <span id="cameraBtnLabel">Start Camera Scanner</span>
+                  </button>
+                  <label class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center space-x-1 cursor-pointer transition">
+                    <i class="fa-solid fa-file-image"></i> <span>Upload QR Image</span>
+                    <input type="file" id="qrImageFileInput" accept="image/*" onchange="handleQRImageUpload(event)" class="hidden" />
+                  </label>
+                </div>
+              </div>
+
+              <!-- Video Scanner Container -->
+              <div id="cameraScannerBox" class="hidden border-2 border-teal-500 rounded-2xl overflow-hidden bg-black p-2">
+                <div id="qr-reader" style="width: 100%;"></div>
+              </div>
+
+              <!-- Hidden container for scanning image files -->
+              <div id="qr-file-reader" class="hidden"></div>
+
+              <!-- Fallback Simulation Button -->
+              <div class="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
+                <span class="text-xs text-slate-600">Quick Simulation using active patient profile:</span>
+                <button type="button" onclick="simulateScanPatient()" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">
+                  Simulate QR Scan
+                </button>
+              </div>
+
+              <!-- Patient Ingestion Details Card (Populated by Scanner) -->
+              <div id="scannedPatientCard" class="border-2 border-teal-600 rounded-2xl p-5 bg-teal-50/40 hidden space-y-4">
+                <div class="flex justify-between items-start border-b border-teal-200 pb-3">
+                  <div class="flex items-center space-x-3">
+                    <img id="scannedPatientAvatar" src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80" class="w-12 h-12 rounded-full object-cover border-2 border-teal-600" />
+                    <div>
+                      <div class="flex items-center space-x-2">
+                        <h4 class="font-extrabold text-teal-950 text-base" id="scanName">-</h4>
+                        <span class="text-[10px] font-extrabold bg-teal-200 text-teal-900 px-2 py-0.5 rounded-full" id="scanVisitBadge">Visit #1</span>
+                      </div>
+                      <p class="text-xs text-slate-600" id="scanMeta">-</p>
+                    </div>
+                  </div>
+                  <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-lg">Verified Intake</span>
+                </div>
+
+                <!-- Case-taking data -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div class="bg-white p-2.5 rounded-xl border border-teal-100">
+                    <p class="text-[11px] font-bold text-slate-500">Disease / Reason for Visit:</p>
+                    <p class="font-semibold text-slate-800" id="scanComplaints">-</p>
+                  </div>
+                  <div class="bg-white p-2.5 rounded-xl border border-teal-100">
+                    <p class="text-[11px] font-bold text-slate-500">ID, Gender & Age:</p>
+                    <p class="font-semibold text-slate-800" id="scanBloodAge">-</p>
+                  </div>
+                </div>
+
+                <!-- OPD Ingestion Form -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                  <div>
+                    <label class="block text-[11px] font-bold text-slate-700 mb-1">Doctor Treated / Assigned Specialist *</label>
+                    <select id="logDoctorSelect" onchange="onTreatedDoctorOrPurposeChange()" class="w-full p-2 border rounded-xl text-xs bg-white font-medium outline-none"></select>
+                  </div>
+                  <div>
+                    <label class="block text-[11px] font-bold text-slate-700 mb-1">Confirmed Disease / Clinical Diagnosis *</label>
+                    <input type="text" id="logPurpose" oninput="onTreatedDoctorOrPurposeChange()" value="Chronic Lumbar Spondylosis with Lower Back Nerve Compression" class="w-full p-2 border rounded-xl text-xs bg-white outline-none" />
+                  </div>
+                </div>
+
+                <div class="border border-slate-200 bg-white rounded-2xl p-3 space-y-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <div>
+                      <p class="text-xs font-black text-slate-800">OPD Token & Priority</p>
+                      <p class="text-[10px] text-slate-500">Scanned patients can be placed directly into the token queue.</p>
+                    </div>
+                    <span id="scannedQueueModeBadge" class="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg">NORMAL QUEUE</span>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block text-[11px] font-bold text-slate-700 mb-1">Case / Priority *</label>
+                      <select id="scannedCaseType" onchange="updateScannedPriorityUI()" class="w-full p-2 border rounded-xl text-xs bg-white font-medium outline-none">
+                        <option value="Normal OPD">Normal OPD</option>
+                        <option value="Heart Emergency">Heart Emergency</option>
+                        <option value="Lung / Breathing Emergency">Lung / Breathing Emergency</option>
+                        <option value="Brain / Neurological Emergency">Brain / Neurological Emergency</option>
+                        <option value="Fracture / Major Trauma">Fracture / Major Trauma</option>
+                        <option value="Snake Bite">Snake Bite</option>
+                        <option value="Seizure">Seizure</option>
+                        <option value="Severe Burn">Severe Burn</option>
+                        <option value="Serious Cut / Wound">Serious Cut / Wound</option>
+                        <option value="Major Blood Loss">Major Blood Loss</option>
+                        <option value="Panic Attack / Acute Distress">Panic Attack / Acute Distress</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-[11px] font-bold text-slate-700 mb-1">Queue Note</label>
+                      <input id="scannedQueueNote" type="text" placeholder="Optional note for triage..." class="w-full p-2 border rounded-xl text-xs bg-white outline-none" />
+                    </div>
+                  </div>
+                  <div id="scannedEmergencyNotice" class="hidden p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-bold">
+                    <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                    Priority case selected. This token will be placed ahead of normal OPD tokens.
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button type="button" onclick="addScannedPatientToTokenQueue()" class="flex-1 bg-teal-800 hover:bg-teal-900 text-white py-2.5 rounded-xl text-xs font-bold shadow transition flex items-center justify-center space-x-2">
+                      <i class="fa-solid fa-ticket"></i> <span>Add Patient to Token Queue</span>
+                    </button>
+                    <button type="button" onclick="commitVisitLog()" class="bg-slate-700 hover:bg-slate-800 text-white py-2.5 px-4 rounded-xl text-xs font-bold shadow transition flex items-center justify-center space-x-2">
+                      <i class="fa-solid fa-check-double"></i> <span>Create Log Only</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap gap-2 pt-1">
+                  <button type="button" onclick="goToHospitalSummaryPrint()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow">
+                    <i class="fa-solid fa-print"></i> <span>Print Medical Summary</span>
+                  </button>
+                  <button type="button" onclick="downloadHospitalSummaryPDF()" class="bg-rose-700 hover:bg-rose-800 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow">
+                    <i class="fa-solid fa-file-pdf"></i> <span>Download PDF</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Hospital Tab 2: Token Queue & Triage -->
+      <div id="hospPageBookings" class="space-y-4 hidden">
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div class="flex flex-col md:flex-row justify-between md:items-center gap-3">
+            <div>
+              <h2 class="font-bold text-slate-800 text-base">Hospital Token Queue & Patient Status Triage</h2>
+              <p class="text-xs text-slate-500">Manage active tokens starting from 001. Marking 'Over' removes them from queue, logs them to OPD vault, and dynamically resequences remaining tokens.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <input type="text" id="bookingSearchInput" onkeyup="filterHospitalBookings()" placeholder="Search token, patient or doctor..." class="p-2 border rounded-xl text-xs bg-slate-50 outline-none" />
+            </div>
+          </div>
+
+          <!-- Token Queue Table -->
+          <div class="overflow-x-auto rounded-xl border border-slate-200">
+            <table class="w-full text-left text-xs text-slate-600">
+              <thead class="bg-slate-100 text-slate-800 uppercase text-[11px] font-bold">
+                <tr>
+                  <th class="p-3">Token No.</th>
+                  <th class="p-3">Slot / Date</th>
+                  <th class="p-3">Patient Details</th>
+                  <th class="p-3">Doctor Assigned</th>
+                  <th class="p-3 text-center">Queue Status</th>
+                  <th class="p-3">Source</th>
+                  <th class="p-3 text-center">Token Actions</th>
+                </tr>
+              </thead>
+              <tbody id="hospitalBookingsBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hospital Tab 3: Dedicated Separate OPD Patient Logs Vault -->
+      <div id="hospPageLogs" class="space-y-6 hidden">
+        <!-- DEDICATED FAST PATIENT DOCUMENT UPLOAD CARD (OPD LOGS) -->
+        <div id="opdLogUploadBox" class="bg-gradient-to-r from-teal-50 via-sky-50 to-blue-50 border-2 border-teal-300 rounded-3xl p-6 shadow-md space-y-4">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-teal-200 pb-3">
+            <div>
+              <h3 class="font-black text-teal-950 text-base md:text-lg flex items-center">
+                <i class="fa-solid fa-cloud-arrow-up text-teal-700 mr-2 text-xl"></i>
+                Upload Diagnostic Document to Patient (OPD Logs)
+              </h3>
+              <p class="text-xs text-slate-600 mt-0.5">Select any patient from the OPD logs or records below, choose their diagnostic file (PDF/image), and save it directly into their personal patient account.</p>
+            </div>
+            <span class="text-[10px] font-black uppercase bg-teal-200 text-teal-950 px-3 py-1 rounded-full self-start md:self-auto shadow-sm">
+              <i class="fa-solid fa-bolt text-amber-600 mr-1"></i> Instant Sync (&lt; 1 sec)
+            </span>
+          </div>
+
+          <form onsubmit="handleOpdLogsUpload(event)" class="space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">1. Select Patient from OPD Logs *</label>
+                <select id="opdLogPatientSelect" onchange="onOpdLogPatientSelectChange(this.value)" required class="w-full p-2.5 border rounded-xl text-xs bg-white font-semibold outline-none shadow-sm focus:ring-2 focus:ring-teal-500">
+                  <option value="">-- Choose Patient from OPD Logs --</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">2. Document Category *</label>
+                <select id="opdLogDocCategory" class="w-full p-2.5 border rounded-xl text-xs bg-white font-semibold outline-none shadow-sm focus:ring-2 focus:ring-teal-500">
+                  <option value="OPD Prescription & Clinical Summary">OPD Prescription & Clinical Summary</option>
+                  <option value="Complete Blood Count (CBC)">Complete Blood Count (CBC)</option>
+                  <option value="X-Ray Scan (Lumbar Spine)">X-Ray Scan</option>
+                  <option value="MRI Brain/Spine">MRI Scan</option>
+                  <option value="Pathology Diagnostic Report">Pathology Diagnostic Report</option>
+                  <option value="Ayurvedic Prakriti Assessment">Ayurvedic Prakriti Assessment</option>
+                  <option value="Discharge & Case Summary">Discharge & Case Summary</option>
+                  <option value="Ultrasound Scan">Ultrasound Scan</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block font-bold text-slate-800 mb-1">3. Select File (PDF / Image) *</label>
+                <input type="file" id="opdLogFileInput" required accept="image/*,application/pdf" class="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-teal-100 file:text-teal-800 border p-1 rounded-xl bg-white shadow-sm" />
+              </div>
+            </div>
+
+            <div id="opdLogPatientInfoStrip" class="hidden bg-white p-3.5 rounded-2xl border border-teal-300 flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm">
+              <div class="flex items-center space-x-3">
+                <div class="bg-teal-700 text-white p-2.5 rounded-xl font-bold text-base">
+                  <i class="fa-solid fa-user-check"></i>
+                </div>
+                <div>
+                  <span class="font-extrabold text-slate-900 text-sm block" id="opdLogSelectedName">Patient Name</span>
+                  <span class="text-slate-500 text-[11px]" id="opdLogSelectedMeta">ID: PAT-1001</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="bg-teal-50 text-teal-800 border border-teal-200 px-2.5 py-1 rounded-lg text-[11px] font-semibold" id="opdLogSelectedDoctor">Doctor: OPD Consultation</span>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-2">
+              <span class="text-[11px] text-slate-500 italic">
+                <i class="fa-solid fa-shield-halved text-teal-600 mr-1"></i> Saves directly into patient account and synchronizes with patient portal instantly.
+              </span>
+              <button type="submit" id="opdLogUploadSubmitBtn" class="bg-teal-700 hover:bg-teal-800 text-white font-black py-2.5 px-6 rounded-xl text-xs shadow-md transition flex items-center space-x-2">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <span>Upload Document & Update Patient Account</span>
+              </button>
+            </div>
+          </form>
+        </div>
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div class="flex flex-col md:flex-row justify-between md:items-center gap-3">
+            <div>
+              <h2 class="font-bold text-slate-800 text-base">OPD Central Patient Log Vault</h2>
+              <p class="text-xs text-slate-500">Complete record of completed token visits, assigned specialists, and visit frequencies for this hospital.</p>
+            </div>
+            <div class="flex gap-2">
+              <input type="text" id="logSearchInput" onkeyup="filterHospitalLogs()" placeholder="Search patient name..." class="p-2 border rounded-xl text-xs bg-slate-50 outline-none" />
+              <button onclick="exportLogsCSV()" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-bold transition">
+                <i class="fa-solid fa-file-csv mr-1"></i> Export Logs
+              </button>
+            </div>
+          </div>
+
+          <!-- Logs Table -->
+          <div class="overflow-x-auto rounded-xl border border-slate-200">
+            <table class="w-full text-left text-xs text-slate-600">
+              <thead class="bg-slate-100 text-slate-800 uppercase text-[11px] font-bold">
+                <tr>
+                  <th class="p-3">Time / Date</th>
+                  <th class="p-3">Token No.</th>
+                  <th class="p-3">Patient Name & ID</th>
+                  <th class="p-3">Doctor Treated</th>
+                  <th class="p-3">Disease / Diagnosis</th>
+                  <th class="p-3 text-center">Attached Reports</th>
+                  <th class="p-3 text-center">Upload Document</th>
+                </tr>
+              </thead>
+              <tbody id="hospitalLogBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hospital Tab 4: Dedicated Print Medical Summary Page -->
+      <div id="hospPageSummary" class="space-y-4 hidden">
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+          <div class="flex justify-between items-center border-b pb-4">
+            <div>
+              <h2 class="font-bold text-slate-800 text-base">Official Clinical Summary Sheet</h2>
+              <p class="text-xs text-slate-500">Strictly focused on the hospital header, core patient metrics, treating doctor, and disease.</p>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow flex items-center space-x-2">
+                <i class="fa-solid fa-print"></i> <span>Print Summary</span>
+              </button>
+              <button onclick="downloadSummaryPDF()" class="bg-rose-700 hover:bg-rose-800 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow flex items-center space-x-2">
+                <i class="fa-solid fa-file-pdf"></i> <span>Download PDF</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Printable Document Container -->
+          <div id="printReportSection" class="bg-white p-8 border-2 border-slate-300 rounded-2xl space-y-6 text-slate-800 max-w-4xl mx-auto shadow-sm">
+            
+            <!-- 1. UPPER SECTION: Name and Photo of Hospital -->
+            <div class="flex justify-between items-center border-b-2 border-slate-800 pb-5">
+              <div class="flex items-center space-x-4">
+                <img id="printHospitalLogo" src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=120&auto=format&fit=crop&q=80" alt="Hospital Photo" class="w-16 h-16 rounded-xl object-cover border border-slate-300 shadow-sm" />
+                <div>
+                  <h1 class="text-2xl font-black uppercase text-[#1e4d79] tracking-tight" id="printHospitalTitle">HOSPITAL OPD</h1>
+                  <p class="text-xs font-bold text-slate-600">CLINICAL OPD MEDICAL SUMMARY REPORT</p>
+                  <p class="text-[11px] text-slate-400">Department of Ayush & Clinical Medicine</p>
+                </div>
+              </div>
+              <div class="text-right text-xs space-y-0.5">
+                <p><strong>Date:</strong> <span id="printCurrentDate"></span></p>
+                <p><strong>Record Status:</strong> <span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold">Verified Intake</span></p>
+              </div>
+            </div>
+
+            <!-- 2. NEXT SECTION: Patient Name, ID, Gender, Blood Group, Age -->
+            <div class="bg-slate-50 p-5 rounded-xl border border-slate-200">
+              <h3 class="text-xs font-black uppercase tracking-wider text-teal-900 border-b pb-2 mb-3">
+                <i class="fa-solid fa-user-injured mr-1.5"></i> Patient Identification & Vitals
+              </h3>
+              <div class="grid grid-cols-2 md:grid-cols-5 gap-4 text-xs">
+                <div>
+                  <span class="text-slate-500 font-medium block">Patient Name:</span>
+                  <span class="font-extrabold text-sm text-slate-900" id="printName">Rahul Sharma</span>
+                </div>
+                <div>
+                  <span class="text-slate-500 font-medium block">Patient ID:</span>
+                  <span class="font-mono font-bold text-teal-800 text-sm" id="printId">PAT-1001</span>
+                </div>
+                <div>
+                  <span class="text-slate-500 font-medium block">Gender & Age:</span>
+                  <span class="font-extrabold text-sm text-slate-900" id="printGenderAge">Male, 32 Yrs</span>
+                </div>
+                <div>
+                  <span class="text-slate-500 font-medium block">Blood Group:</span>
+                  <span class="font-black text-rose-700 text-sm" id="printBloodGroup">O+</span>
+                </div>
+                <div>
+                  <span class="text-slate-500 font-medium block">Phone Number:</span>
+                  <span class="font-extrabold text-sm text-slate-900 font-mono" id="printPhone">+91 98765 43210</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. CLINICAL SUMMARY: Doctor Treated and What is the Disease -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div class="bg-teal-50/50 p-4 rounded-xl border border-teal-200">
+                <span class="text-teal-900 font-bold uppercase text-[11px] block mb-1">
+                  <i class="fa-solid fa-user-doctor mr-1"></i> Doctor Treated:
+                </span>
+                <p class="text-base font-extrabold text-teal-950" id="printDoctorTreated">Attending Doctor</p>
+              </div>
+
+              <div class="bg-amber-50/50 p-4 rounded-xl border border-amber-200">
+                <span class="text-amber-900 font-bold uppercase text-[11px] block mb-1">
+                  <i class="fa-solid fa-virus-covid mr-1"></i> What is the Disease / Diagnosis:
+                </span>
+                <p class="text-base font-extrabold text-amber-950" id="printDisease">Chronic Lumbar Spondylosis with Lower Back Nerve Compression</p>
+              </div>
+            </div>
+
+            <!-- 4. CLINICAL RX PRESCRIPTION & MEDICAL ORDERS -->
+            <div class="bg-white p-5 rounded-xl border border-slate-200 space-y-3">
+              <h3 class="text-xs font-black uppercase tracking-wider text-teal-900 border-b pb-2 flex items-center justify-between">
+                <span><i class="fa-solid fa-prescription mr-1.5 text-teal-700"></i> Prescribed Medications (Rx) & Clinical Orders</span>
+                <span class="text-[10px] text-slate-500 font-normal">Standard AYUSH / Allopathic Regimen</span>
+              </h3>
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs text-left">
+                  <thead class="bg-slate-100 text-slate-700 uppercase text-[10px] font-bold">
+                    <tr>
+                      <th class="p-2">#</th>
+                      <th class="p-2">Medicine / Formulation</th>
+                      <th class="p-2">Dosage / Strength</th>
+                      <th class="p-2">Frequency (M-A-N)</th>
+                      <th class="p-2">Timing</th>
+                      <th class="p-2">Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody id="printRxTableBody" class="divide-y divide-slate-100 font-medium">
+                    <tr>
+                      <td class="p-2">1</td>
+                      <td class="p-2 font-bold text-slate-900">Yograj Guggulu / Amlodipine</td>
+                      <td class="p-2">500 mg</td>
+                      <td class="p-2 font-bold text-teal-800">1 - 0 - 1</td>
+                      <td class="p-2">After Meals with Warm Water</td>
+                      <td class="p-2">14 Days</td>
+                    </tr>
+                    <tr>
+                      <td class="p-2">2</td>
+                      <td class="p-2 font-bold text-slate-900">Dashmularishta Liquid</td>
+                      <td class="p-2">20 ml</td>
+                      <td class="p-2 font-bold text-teal-800">1 - 0 - 1</td>
+                      <td class="p-2">With Equal Water After Meals</td>
+                      <td class="p-2">21 Days</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 text-xs">
+                <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <strong class="text-slate-700 block mb-0.5">Dietary & Lifestyle Guidelines (Pathya):</strong>
+                  <p id="printDietAdvice" class="text-slate-600">Avoid cold/sour foods, maintain spinal lumbar support, light morning walk.</p>
+                </div>
+                <div class="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <strong class="text-slate-700 block mb-0.5">Recommended Lab Tests / Follow-up:</strong>
+                  <p id="printLabAdvice" class="text-slate-600">Review in 14 days with repeat Lumbar Spine X-ray report.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. VERIFIABLE ANTI-FRAUD QR CODE & OFFICIAL SIGN-OFF -->
+            <div class="pt-6 border-t-2 border-slate-800 flex flex-col md:flex-row justify-between items-center md:items-end gap-4 text-xs">
+              <div class="flex items-center space-x-3">
+                <div id="printVerifiableQr" class="bg-white p-1 border-2 border-slate-900 rounded-lg shadow-sm"></div>
+                <div class="space-y-0.5 text-left">
+                  <p class="font-extrabold text-slate-900 uppercase text-[10px] tracking-wide flex items-center">
+                    <i class="fa-solid fa-shield-halved text-emerald-600 mr-1"></i> Digital Authenticity Verification
+                  </p>
+                  <p class="text-[10px] text-slate-500 font-mono">Hash: <span id="printVerifyHash" class="text-slate-700 font-bold">AYUSH-E982F1-VERIFIED</span></p>
+                  <p class="text-[9px] text-slate-400">Scan via any smartphone to verify prescription authenticity.</p>
+                </div>
+              </div>
+
+              <div class="text-center">
+                <div class="w-48 border-b-2 border-slate-800 pb-1 mb-1">
+                  <span class="font-serif text-base text-slate-800 italic" id="printDoctorSignature">Attending Doctor</span>
+                </div>
+                <p class="font-bold text-slate-900">Attending Specialist Signature</p>
+                <p class="text-[10px] text-slate-500 font-mono" id="printDocRegNo">Reg. No: AYUSH/MED/2026/8942</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hospital Tab 5: Doctor Roster & Photo Registration & Delete Option -->
+      <div id="hospPageDoctors" class="grid grid-cols-1 lg:grid-cols-3 gap-6 hidden">
+        
+        <!-- Registration Form (1 Col) - Hidden when logged in as patient -->
+        <div id="docRegistrationCard" class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div>
+            <h3 class="font-bold text-slate-800 text-sm flex items-center">
+              <i class="fa-solid fa-user-plus text-teal-600 mr-2"></i> Register New Doctor
+            </h3>
+            <p class="text-xs text-slate-500">Add physicians under your hospital roster with full specialty classification. Newly registered doctors will appear instantly in Patient Mode.</p>
+          </div>
+
+          <form onsubmit="addNewDoctor(event)" class="space-y-3">
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">Doctor Name *</label>
+              <input type="text" id="docName" required placeholder="Dr. Rajesh Varma" class="w-full p-2 border rounded-xl text-xs outline-none" />
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">Hospital Affiliation *</label>
+              <input type="text" id="docHospitalName" required placeholder="Hospital Name" class="w-full p-2 border rounded-xl text-xs outline-none font-medium bg-slate-50" />
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">Department / Specialty *</label>
+              <select id="docDept" class="w-full p-2 border rounded-xl text-xs outline-none font-medium">
+                <option value="General Practice">General Practice</option>
+                <option value="Gastroenterology">Gastroenterology</option>
+                <option value="Cardiology">Cardiology</option>
+                <option value="Pediatrics">Pediatrics</option>
+                <option value="Endocrinology">Endocrinology</option>
+                <option value="Orthopedic">Orthopedic</option>
+                <option value="Pathology">Pathology</option>
+                <option value="Radiology">Radiology</option>
+                <option value="Psychiatry">Psychiatry</option>
+                <option value="Ophthalmology">Ophthalmology</option>
+                <option value="Neurology">Neurology</option>
+                <option value="Pulmonology">Pulmonology</option>
+                <option value="Otolaryngology (ENT)">Otolaryngology (ENT)</option>
+                <option value="Urology">Urology</option>
+                <option value="Kayachikitsa (Internal Med)">Kayachikitsa (Ayurveda)</option>
+                <option value="Panchakarma">Panchakarma</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[11px] font-bold text-slate-700 mb-1">Status</label>
+                <select id="docStatus" class="w-full p-2 border rounded-xl text-xs outline-none font-bold">
+                  <option value="Available" class="text-emerald-600">Available</option>
+                  <option value="On Leave" class="text-rose-600">On Leave</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-700 mb-1">Room / OPD No.</label>
+                <input type="text" id="docRoom" placeholder="Chamber 204" class="w-full p-2 border rounded-xl text-xs outline-none" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold text-slate-700 mb-1">Doctor Photo (Upload)</label>
+              <input type="file" id="docPhotoInput" accept="image/*" class="w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-xs file:bg-slate-100 border p-1 rounded-xl" />
+            </div>
+
+            <button type="submit" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 rounded-xl text-xs shadow transition">
+              + Register Doctor Profile
+            </button>
+          </form>
+        </div>
+
+        <!-- Hospital Doctor Roster List (2 Cols with Delete Action) -->
+        <div id="rosterListContainer" class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-slate-800 text-sm">Manage Hospital Doctor Roster</h3>
+              <p class="text-xs text-slate-500">Toggle availability or delete doctors who have left the institution.</p>
+            </div>
+          </div>
+          <div id="hospitalDoctorRosterList" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs"></div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- APPOINTMENT MODAL -->
+  <div id="bookingModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-100">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-black text-slate-800 text-base">Book Specialist OPD Appointment</h3>
+        <button onclick="closeBookingModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+      </div>
+      
+      <!-- Doctor and Hospital Info Container in Modal -->
+      <div id="modalDoctorDetails" class="text-xs bg-teal-50/60 p-4 rounded-2xl border border-teal-100 space-y-2"></div>
+      
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Appointment Date & Slot</label>
+          <input type="date" id="bookDate" class="w-full p-2.5 border rounded-xl text-xs mb-2 bg-slate-50 outline-none" />
+          <select id="bookSlot" class="w-full p-2.5 border rounded-xl text-xs bg-slate-50 outline-none font-medium">
+            <option>09:30 AM - 10:00 AM (Morning OPD)</option>
+            <option>10:30 AM - 11:00 AM (Morning OPD)</option>
+            <option>02:00 PM - 02:30 PM (Afternoon OPD)</option>
+            <option>03:30 PM - 04:00 PM (Afternoon OPD)</option>
+          </select>
+        </div>
+      </div>
+      <button onclick="confirmAppointment()" class="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-3 rounded-xl text-xs shadow-lg transition">
+        Confirm Booking & Issue Token (001, 002...)
+      </button>
+    </div>
+  </div>
+
+  <!-- QUICK REPORT UPLOAD MODAL FOR LOG VAULT & BOOKINGS -->
+  <div id="quickUploadModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-100">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-black text-slate-800 text-base">Attach Diagnostic Report to Patient</h3>
+        <button onclick="closeQuickUploadModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+      </div>
+      <div class="text-xs space-y-3">
+        <p><strong>Patient ID:</strong> <span id="quickUploadPatientId" class="text-teal-800 font-bold font-mono"></span></p>
+        <p><strong>Patient Name:</strong> <span id="quickUploadPatientName" class="text-slate-800 font-bold"></span></p>
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1">Report Category</label>
+          <select id="quickRepCategory" class="w-full p-2 border rounded-xl text-xs bg-slate-50">
+            <option value="Blood Test Report (CBC)">Complete Blood Count (CBC)</option>
+            <option value="X-Ray Scan (Lumbar Spine)">X-Ray Scan</option>
+            <option value="MRI Brain/Spine">MRI Scan</option>
+            <option value="Pathology Report">Pathology Report</option>
+            <option value="Prakriti Diagnostic Assessment">Ayurvedic Prakriti Analysis</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] font-bold text-slate-700 mb-1">Select File</label>
+          <input type="file" id="quickFileInput" accept="image/*,application/pdf,.doc,.docx,.txt,.csv,.xls,.xlsx" class="w-full text-xs text-slate-500 border p-1 rounded-xl" />
+        </div>
+        <button onclick="saveQuickReport()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs shadow">
+          Upload Directly to Vault
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= DOCTOR CONSULTATION & RX PRESCRIPTION MODAL ================= -->
+  <div id="doctorConsultationModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-3xl w-full p-6 space-y-4 shadow-2xl border border-slate-100 my-8">
+      <div class="flex justify-between items-center border-b pb-3">
+        <div>
+          <span class="bg-teal-100 text-teal-900 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">Electronic Health Record (EHR)</span>
+          <h3 class="font-black text-slate-900 text-lg mt-0.5 flex items-center">
+            <i class="fa-solid fa-stethoscope text-teal-700 mr-2"></i> Clinical Consultation & Rx Builder
+          </h3>
+        </div>
+        <button onclick="hideModalFlex('doctorConsultationModal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">&times;</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-50 p-3 rounded-2xl border text-xs">
+        <div><span class="text-slate-500 block">Patient Name:</span><strong id="consultPatientName" class="text-slate-900 text-sm">-</strong></div>
+        <div><span class="text-slate-500 block">Patient ID / ABHA:</span><strong id="consultPatientId" class="text-teal-800 font-mono text-sm">-</strong></div>
+        <div><span class="text-slate-500 block">Token Number:</span><span id="consultTokenBadge" class="bg-teal-800 text-white font-black px-2 py-0.5 rounded-lg text-xs">-</span></div>
+      </div>
+
+      <form onsubmit="saveDoctorConsultation(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="consultBookingId" value="" />
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Chief Complaints / Presenting Symptoms *</label>
+            <textarea id="consultComplaints" required rows="2" class="w-full p-2 border rounded-xl bg-slate-50 outline-none focus:bg-white" placeholder="Patient complaints..."></textarea>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Confirmed Clinical Diagnosis *</label>
+            <textarea id="consultDiagnosis" required rows="2" class="w-full p-2 border rounded-xl bg-slate-50 outline-none focus:bg-white" placeholder="Primary diagnosis (e.g. Lumbar Spondylosis, Vatavyadhi)..."></textarea>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex justify-between items-center">
+            <label class="block text-[11px] font-bold text-slate-800 uppercase tracking-wide">Prescription Medications (Rx)</label>
+            <button type="button" onclick="addRxMedicineRow()" class="text-teal-700 hover:text-teal-800 font-bold text-xs flex items-center">
+              <i class="fa-solid fa-plus-circle mr-1"></i> Add Medicine Row
+            </button>
+          </div>
+          <div class="border rounded-2xl overflow-hidden shadow-sm">
+            <table class="w-full text-left">
+              <thead class="bg-slate-100 text-slate-700 text-[10px] font-bold uppercase">
+                <tr>
+                  <th class="p-2.5">Medicine Name</th>
+                  <th class="p-2.5">Dosage</th>
+                  <th class="p-2.5">Frequency</th>
+                  <th class="p-2.5">Timing</th>
+                  <th class="p-2.5">Days</th>
+                  <th class="p-2.5 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="consultRxTableBody" class="divide-y divide-slate-100 bg-white">
+                <tr>
+                  <td class="p-2"><input type="text" class="w-full p-1.5 border rounded-lg rx-med-name" value="Yograj Guggulu" placeholder="Drug name" required /></td>
+                  <td class="p-2"><input type="text" class="w-full p-1.5 border rounded-lg rx-med-dose" value="500 mg" placeholder="Dose" /></td>
+                  <td class="p-2"><select class="w-full p-1.5 border rounded-lg rx-med-freq"><option value="1 - 0 - 1">1-0-1 (BID)</option><option value="1 - 1 - 1">1-1-1 (TID)</option><option value="1 - 0 - 0">1-0-0 (OD)</option><option value="0 - 0 - 1">0-0-1 (OD)</option><option value="SOS">SOS</option></select></td>
+                  <td class="p-2"><select class="w-full p-1.5 border rounded-lg rx-med-time"><option value="After Food">After Food</option><option value="Before Food">Before Food</option><option value="With Milk">With Milk</option></select></td>
+                  <td class="p-2"><input type="number" class="w-16 p-1.5 border rounded-lg rx-med-days" value="14" min="1" /></td>
+                  <td class="p-2 text-center"><button type="button" onclick="removeRxMedicineRow(this)" class="text-rose-500 hover:text-rose-700 p-1"><i class="fa-solid fa-trash-can"></i></button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Dietary & Lifestyle Advice (Pathya-Apathya)</label>
+            <input type="text" id="consultDiet" class="w-full p-2 border rounded-xl bg-slate-50" value="Avoid cold food, take warm water, practice lumbar stretching." />
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">Recommended Lab / Radiology Tests</label>
+            <input type="text" id="consultLabTests" class="w-full p-2 border rounded-xl bg-slate-50" value="Repeat Lumbar X-Ray, Serum Calcium" />
+          </div>
+        </div>
+
+        <div class="pt-2 flex justify-end space-x-2 border-t">
+          <button type="button" onclick="hideModalFlex('doctorConsultationModal')" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl">Cancel</button>
+          <button type="submit" class="px-6 py-2.5 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl shadow flex items-center space-x-2">
+            <i class="fa-solid fa-check-double"></i> <span>Complete Visit & Generate Verifiable Rx</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- REPORT PREVIEW MODAL -->
+  <div id="reportPreviewModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center p-4 z-[90]">
+    <div class="bg-white w-full max-w-3xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+      <div class="bg-slate-800 text-white p-4 flex justify-between items-center">
+        <div>
+          <span class="bg-teal-500 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase" id="prevRepCategory">Prescription</span>
+          <h3 class="font-bold text-base mt-1" id="prevRepTitle">Document Preview</h3>
+          <p class="text-[11px] text-slate-300" id="prevRepFileName">File: document.pdf</p>
+        </div>
+        <button onclick="hideModalFlex('reportPreviewModal')" class="text-slate-400 hover:text-white text-xl">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div id="reportPreviewContent" class="p-4 flex-1 overflow-auto bg-slate-100 flex items-center justify-center min-h-[400px]"></div>
+      <div class="p-3 bg-white border-t border-slate-200 flex justify-between items-center">
+        <button onclick="hideModalFlex('reportPreviewModal')" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl">Close Preview</button>
+        <button id="previewDownloadBtn" class="px-5 py-2 bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5 shadow">
+          <i class="fa-solid fa-download"></i> <span>Download File</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HOSPITAL PATIENT REPORTS MODAL -->
+  <div id="hospitalPatientReportsModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm hidden items-center justify-center p-4 z-[85]">
+    <div class="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-start border-b pb-3">
+        <div>
+          <h3 class="font-black text-slate-900 text-base flex items-center">
+            <i class="fa-solid fa-folder-open text-teal-700 mr-2"></i> Attached Documents for Patient
+          </h3>
+          <p class="text-xs text-slate-500 mt-1" id="hospPatientReportsModalSub">All laboratory & scan reports linked to this patient ID.</p>
+        </div>
+        <button onclick="hideModalFlex('hospitalPatientReportsModal')" class="text-slate-400 hover:text-slate-700 text-xl font-bold">&times;</button>
+      </div>
+      <div id="hospPatientReportsList" class="space-y-3 overflow-y-auto flex-1 p-1"></div>
+      <div class="border-t pt-3 flex justify-end">
+        <button onclick="hideModalFlex('hospitalPatientReportsModal')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2 rounded-xl text-xs font-bold">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= JAVASCRIPT APPLICATION LOGIC ================= -->
+  <script>
+    let isNavigatingHistory = false;
+    let currentNavState = { screen: 'auth', tab: 1, modal: null };
+
+    function pushNavState(state, title, hash) {
+      if (isNavigatingHistory) return;
+      currentNavState = { ...currentNavState, ...state };
+      try {
+        const url = hash ? hash : window.location.pathname;
+        window.history.pushState(currentNavState, title || document.title, url);
+      } catch (e) {}
+      updateHeaderBackButton();
+    }
+
+    function getOpenModalId() {
+      const modalIds = [
+        'bookingModal', 'emergencyModal', 'quickUploadModal', 'doctorConsultationModal',
+        'reportPreviewModal', 'hospitalPatientReportsModal'
+      ];
+      for (const id of modalIds) {
+        const el = document.getElementById(id);
+        if (el && !el.classList.contains('hidden')) return id;
+      }
+      return null;
+    }
+
+    function closeActiveModal() {
+      const id = getOpenModalId();
+      if (!id) return false;
+      if (id === 'bookingModal') closeBookingModal();
+      else if (id === 'emergencyModal') closeEmergencyModal();
+      else if (id === 'quickUploadModal') closeQuickUploadModal();
+      else if (id === 'doctorConsultationModal') hideModalFlex('doctorConsultationModal');
+      else if (id === 'reportPreviewModal') hideModalFlex('reportPreviewModal');
+      else if (id === 'hospitalPatientReportsModal') hideModalFlex('hospitalPatientReportsModal');
+      updateHeaderBackButton();
+      return true;
+    }
+
+    function handleAppBack() {
+      if (closeActiveModal()) return;
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        fallbackBackNavigation();
+      }
+    }
+
+    function fallbackBackNavigation() {
+      if (!currentLoggedUser) return;
+      if (currentLoggedUser.role === 'patient') {
+        const activePage = [1, 2, 3, 4].find(n => {
+          const p = document.getElementById(`ptPage${n}`);
+          return p && !p.classList.contains('hidden');
+        });
+        if (activePage && activePage > 1) {
+          switchPatientTab(1);
+        } else {
+          logoutSession();
+        }
+      } else {
+        const hospPages = ['ingestion', 'bookings', 'logs', 'summary', 'doctors'];
+        const activePage = hospPages.find(name => {
+          const p = document.getElementById(`hospPage${name.charAt(0).toUpperCase() + name.slice(1)}`);
+          return p && !p.classList.contains('hidden');
+        });
+        if (activePage && activePage !== 'ingestion') {
+          switchHospitalTab('ingestion');
+        } else {
+          logoutSession();
+        }
+      }
+      updateHeaderBackButton();
+    }
+
+    function updateHeaderBackButton() {
+      const backBtn = document.getElementById('headerBackBtn');
+      if (!backBtn) return;
+      const isAuthVisible = !document.getElementById('authScreen')?.classList.contains('hidden');
+      if (isAuthVisible) {
+        backBtn.classList.add('hidden');
+        return;
+      }
+      const hasOpenModal = !!getOpenModalId();
+      let canGoBack = hasOpenModal;
+      if (!canGoBack && currentLoggedUser) {
+        if (currentLoggedUser.role === 'patient') {
+          const isTab1 = !document.getElementById('ptPage1')?.classList.contains('hidden');
+          canGoBack = !isTab1 || window.history.length > 1;
+        } else {
+          const isIngestion = !document.getElementById('hospPageIngestion')?.classList.contains('hidden');
+          canGoBack = !isIngestion || window.history.length > 1;
+        }
+      }
+      if (canGoBack) {
+        backBtn.classList.remove('hidden');
+      } else {
+        backBtn.classList.add('hidden');
+      }
+    }
+
+    window.addEventListener('popstate', (event) => {
+      if (closeActiveModal()) {
+        updateHeaderBackButton();
+        return;
+      }
+
+      isNavigatingHistory = true;
+      const state = event.state;
+      if (state) {
+        currentNavState = state;
+        if (state.screen === 'patient') {
+          if (document.getElementById('patientSection').classList.contains('hidden')) {
+            document.getElementById('patientSection').classList.remove('hidden');
+            document.getElementById('hospitalSection').classList.add('hidden');
+            document.getElementById('authScreen').classList.add('hidden');
+          }
+          switchPatientTab(state.tab || 1, false);
+        } else if (state.screen === 'hospital') {
+          if (document.getElementById('hospitalSection').classList.contains('hidden')) {
+            document.getElementById('hospitalSection').classList.remove('hidden');
+            document.getElementById('patientSection').classList.add('hidden');
+            document.getElementById('authScreen').classList.add('hidden');
+          }
+          switchHospitalTab(state.tab || 'ingestion', false);
+        } else if (state.screen === 'auth') {
+          logoutSession(false);
+        }
+      } else {
+        fallbackBackNavigation();
+      }
+      isNavigatingHistory = false;
+      updateHeaderBackButton();
+    });
+
+    let audioCtx = null;
+    let ttsAudioEnabled = true;
+    let ttsLanguage = "en-IN";
+
+    function getAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      return audioCtx;
+    }
+
+    function synthesizeTone(type) {
+      try {
+        const ctx = getAudioContext();
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (type === 'chime') {
+          osc.frequency.setValueAtTime(523.25, now);
+          osc.frequency.setValueAtTime(659.25, now + 0.2);
+          osc.frequency.setValueAtTime(783.99, now + 0.4);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+          osc.start(now);
+          osc.stop(now + 0.7);
+        }
+      } catch (e) {}
+    }
+
+    function announceToken(tokenNum, patientName, roomNum, doctorName) {
+      synthesizeTone('chime');
+      if (!ttsAudioEnabled || !('speechSynthesis' in window)) return;
+      setTimeout(() => {
+        try {
+          window.speechSynthesis.cancel();
+          const text = `Attention please: Token number ${tokenNum}, patient ${patientName}, please proceed to ${roomNum || 'Room 101'}, ${doctorName || 'Doctor'}.`;
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.lang = ttsLanguage;
+          utter.rate = 0.95;
+          utter.pitch = 1.05;
+          window.speechSynthesis.speak(utter);
+        } catch (err) {}
+      }, 450);
+    }
+
+    // UPDATED FIREBASE CONFIG WITH NEW DATABASE URL
+    const firebaseConfig = {
+      apiKey: "AIzaSyDemoKeyAyushCareSIH2026",
+      authDomain: "health-app-fb7de.firebaseapp.com",
+      projectId: "health-app-fb7de",
+      databaseURL: "https://health-app-fb7de-default-rtdb.firebaseio.com/",
+      storageBucket: "health-app-fb7de.firebasestorage.app",
+      messagingSenderId: "108294719283",
+      appId: "1:108294719283:web:7f8a9b0c1d2e3f"
+    };
+
+    try {
+      firebase.initializeApp(firebaseConfig);
+    } catch (fbInitErr) {}
+    const db = firebase.database();
+
+    let currentHospitalName = "";
+    let hospitalLogoUrl = "";
+    let activeAuthRole = "patient";
+    let activeAuthTab = "login";
+    let currentLoggedUser = null;
+    let patientAvatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80";
+    let patientUniqueId = "";
+
+    let registeredUsers = [];
+    let doctors = [];
+    let patientBookings = [];
+    let patientReports = [];
+    let visitLogs = [];
+
+    db.ref('users').on('value', (snapshot) => {
+      const data = snapshot.val();
+      registeredUsers = data ? Object.values(data) : [];
+    });
+
+    db.ref('doctors').on('value', (snapshot) => {
+      const data = snapshot.val();
+      doctors = data ? Object.values(data) : [];
+      renderPatientDoctors();
+      renderHospitalRoster();
+      populateDoctorSelect();
+      populateEmergencyDoctorSelect();
+      populateHospitalFilterDropdown();
+    });
+
+    db.ref('bookings').on('value', (snapshot) => {
+      const data = snapshot.val();
+      patientBookings = data ? Object.values(data) : [];
+      resequenceQueueNumbers();
+      renderHospitalBookings();
+      renderPatientAppointments();
+      checkRealtimeTokenAlerts();
+    });
+
+    db.ref('reports').on('value', (snapshot) => {
+      const data = snapshot.val();
+      patientReports = data ? Object.values(data) : [];
+      renderPatientReports();
+    });
+
+    db.ref('logs').on('value', (snapshot) => {
+      const data = snapshot.val();
+      visitLogs = data ? Object.values(data) : [];
+      renderHospitalLogs();
+    });
+
+    async function initializeCleanDatabase() {
+      try {
+        await db.ref('.info/connected').once('value');
+      } catch (error) {}
+    }
+
+    function sanitizeFirebaseKey(value) {
+      return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+
+    function setAuthTab(tab) {
+      activeAuthTab = tab;
+      hideAuthAlert();
+      const btnLogin = document.getElementById('tabBtnLogin');
+      const btnSignup = document.getElementById('tabBtnSignup');
+      const signupNameGroup = document.getElementById('signupNameGroup');
+      const hospitalAuthGroup = document.getElementById('hospitalAuthGroup');
+      const submitBtn = document.getElementById('authSubmitBtn');
+
+      if (tab === 'login') {
+        btnLogin.className = "flex-1 pb-2.5 text-xs font-bold text-teal-700 border-b-2 border-teal-600 transition";
+        btnSignup.className = "flex-1 pb-2.5 text-xs font-semibold text-slate-400 hover:text-slate-700 transition";
+        signupNameGroup.classList.add('hidden');
+        hospitalAuthGroup.classList.add('hidden');
+        submitBtn.innerHTML = `<span>Sign In</span> <i class="fa-solid fa-arrow-right text-[10px]"></i>`;
+      } else {
+        btnSignup.className = "flex-1 pb-2.5 text-xs font-bold text-teal-700 border-b-2 border-teal-600 transition";
+        btnLogin.className = "flex-1 pb-2.5 text-xs font-semibold text-slate-400 hover:text-slate-700 transition";
+        signupNameGroup.classList.remove('hidden');
+        if (activeAuthRole === 'hospital') {
+          hospitalAuthGroup.classList.remove('hidden');
+        }
+        submitBtn.innerHTML = `<span>Create Account</span> <i class="fa-solid fa-user-plus text-[10px]"></i>`;
+      }
+    }
+
+    function setAuthRole(role) {
+      activeAuthRole = role;
+      hideAuthAlert();
+      const btnPat = document.getElementById('authRolePatient');
+      const btnHosp = document.getElementById('authRoleHospital');
+      const hospGroup = document.getElementById('hospitalAuthGroup');
+      const idLabel = document.getElementById('authIdentifierLabel');
+      const nameLabel = document.getElementById('nameFieldLabel');
+
+      if (role === 'patient') {
+        btnPat.className = "py-2.5 rounded-lg bg-white shadow-sm text-teal-800 font-bold transition";
+        btnHosp.className = "py-2.5 rounded-lg text-slate-500 hover:text-slate-800 transition";
+        hospGroup.classList.add('hidden');
+        idLabel.textContent = "Patient Email / ABHA ID *";
+        nameLabel.textContent = "Patient Full Name *";
+        document.getElementById('authIdentifier').placeholder = "Enter email or ABHA ID";
+      } else {
+        btnHosp.className = "py-2.5 rounded-lg bg-white shadow-sm text-amber-700 font-bold transition";
+        btnPat.className = "py-2.5 rounded-lg text-slate-500 hover:text-slate-800 transition";
+        if (activeAuthTab === 'signup') {
+          hospGroup.classList.remove('hidden');
+        } else {
+          hospGroup.classList.add('hidden');
+        }
+        idLabel.textContent = "Staff Username / Work Email *";
+        nameLabel.textContent = "Staff Member Name *";
+        document.getElementById('authIdentifier').placeholder = "Enter staff ID / work email";
+      }
+    }
+
+    function showAuthAlert(message, type = "error") {
+      const box = document.getElementById('authAlertBox');
+      const txt = document.getElementById('authAlertText');
+      box.className = type === "error" 
+        ? "p-3 rounded-xl text-xs flex items-center space-x-2 bg-rose-50 border border-rose-200 text-rose-800" 
+        : "p-3 rounded-xl text-xs flex items-center space-x-2 bg-teal-50 border border-teal-200 text-teal-800";
+      txt.innerHTML = message;
+      box.classList.remove('hidden');
+    }
+
+    function hideAuthAlert() {
+      document.getElementById('authAlertBox').classList.add('hidden');
+    }
+
+    function previewHospitalLogo(e) {
+      if (e.target.files && e.target.files[0]) {
+        hospitalLogoUrl = URL.createObjectURL(e.target.files[0]);
+      }
+    }
+
+    async function handleAuthSubmit(e) {
+      e.preventDefault();
+      hideAuthAlert();
+
+      const identifier = document.getElementById('authIdentifier').value.trim().toLowerCase();
+      const password = document.getElementById('authPassword').value;
+
+      if (!identifier || !password) {
+        showAuthAlert('Please enter your email/ID and password.');
+        return;
+      }
+
+      try {
+        const snapshot = await db.ref('users').once('value');
+        const users = snapshot.val() || {};
+        const entries = Object.entries(users);
+
+        if (activeAuthTab === 'login') {
+          const existingEntry = entries.find(([key, u]) =>
+            u && String(u.email || '').toLowerCase() === identifier && u.role === activeAuthRole
+          );
+
+          if (!existingEntry) {
+            showAuthAlert(`No account found for "<strong>${identifier}</strong>". Please switch to <strong>Create New Account</strong>.`);
+            return;
+          }
+
+          const existing = existingEntry[1];
+          if (existing.pass !== password) {
+            showAuthAlert('Invalid password. Please enter the correct password.');
+            return;
+          }
+
+          currentLoggedUser = existing;
+          localStorage.setItem('ayushcare_session', JSON.stringify(existing));
+          registeredUsers = entries.map(([key, u]) => u).filter(Boolean);
+          if (existing.hospital) currentHospitalName = existing.hospital;
+          if (existing.patientId) patientUniqueId = existing.patientId;
+          launchPortal(existing);
+          return;
+        }
+
+        const fullName = document.getElementById('authFullName').value.trim();
+        if (!fullName) {
+          showAuthAlert('Please provide your full name to create an account.');
+          return;
+        }
+
+        const duplicate = entries.find(([key, u]) =>
+          u && String(u.email || '').toLowerCase() === identifier && u.role === activeAuthRole
+        );
+
+        if (duplicate) {
+          showAuthAlert(`An account with "<strong>${identifier}</strong>" already exists. Please Sign In.`);
+          return;
+        }
+
+        let hospitalName = currentHospitalName;
+        if (activeAuthRole === 'hospital') {
+          const hospName = document.getElementById('authHospitalName').value.trim();
+          if (!hospName) {
+            showAuthAlert('Please enter your Hospital / Medical Center Name to create your hospital login.');
+            return;
+          }
+          hospitalName = hospName;
+          currentHospitalName = hospitalName;
+        }
+
+        const newPatientId = activeAuthRole === 'patient'
+          ? 'PAT-' + Date.now().toString().slice(-8)
+          : null;
+
+        const newUser = {
+          email: identifier,
+          pass: password,
+          name: fullName,
+          role: activeAuthRole,
+          hospital: activeAuthRole === 'hospital' ? hospitalName : null,
+          patientId: newPatientId,
+          gender: activeAuthRole === 'patient' ? 'Not specified' : null,
+          age: '',
+          blood: '',
+          phone: '',
+          address: '',
+          dob: '',
+          emergencyContactName: '',
+          emergencyContactRelationship: '',
+          emergencyContactPhone: '',
+          insuranceProvider: '',
+          policyNumber: '',
+          allergies: '',
+          medications: '',
+          visitReason: '',
+          createdAt: Date.now()
+        };
+
+        const userKey = 'user_' + Date.now();
+        await db.ref('users/' + userKey).set(newUser);
+
+        registeredUsers.push(newUser);
+        currentLoggedUser = newUser;
+        patientUniqueId = newPatientId || patientUniqueId;
+        localStorage.setItem('ayushcare_session', JSON.stringify(newUser));
+        launchPortal(newUser);
+
+        if (activeAuthRole === 'patient') {
+          showAuthAlert('Account created successfully.', 'success');
+        }
+      } catch (err) {
+        showAuthAlert('Firebase error: ' + (err?.message || String(err)));
+      }
+    }
+
+    function launchPortal(user, recordHistory = true) {
+      if (recordHistory) pushNavState({ screen: user.role, tab: user.role === 'patient' ? 1 : 'ingestion' }, 'AyushCare ' + user.role, '#' + user.role);
+      const pSec = document.getElementById('patientSection');
+      const hSec = document.getElementById('hospitalSection');
+      const regCard = document.getElementById('docRegistrationCard');
+      const rosterListContainer = document.getElementById('rosterListContainer');
+
+      document.getElementById('userGreetingName').textContent = user.name;
+      document.getElementById('userGreetingRole').textContent = user.role === 'patient' ? 'Patient' : `${currentHospitalName} (Staff)`;
+
+      if (user.role === 'patient') {
+        pSec.classList.remove('hidden');
+        hSec.classList.add('hidden');
+        document.getElementById('headerMainTitle').textContent = "AyushCare Patient Portal";
+        document.getElementById('headerRoleBadge').textContent = "Patient Mode";
+        document.getElementById('headerSubtitle').textContent = "Medical Registration, Dynamic QR & Specialist Booking";
+        document.getElementById('pFullName').value = user.name;
+        document.getElementById('pEmail').value = user.email;
+        if (user.patientId) patientUniqueId = user.patientId;
+        document.getElementById('pUniqueId').value = patientUniqueId;
+        if (user.gender) document.getElementById('pGender').value = user.gender;
+        updatePatientDisplayName();
+        renderPatientDoctors();
+        renderPatientReports();
+        renderPatientAppointments();
+        generatePatientQR();
+        
+        if (regCard) regCard.classList.add('hidden');
+        if (rosterListContainer) rosterListContainer.className = "lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4";
+      } else {
+        pSec.classList.add('hidden');
+        hSec.classList.remove('hidden');
+        document.getElementById('headerMainTitle').textContent = "AyushCare Hospital System";
+        document.getElementById('headerRoleBadge').textContent = "Hospital Staff";
+        document.getElementById('headerSubtitle').textContent = "Camera QR Emergency Triage, Queue & OPD Logs";
+        if (user.hospital) currentHospitalName = user.hospital;
+        updateHospitalNameDisplays();
+        renderHospitalBookings();
+        renderHospitalRoster();
+        renderHospitalLogs();
+        populateDoctorSelect();
+        populateOpdLogsPatientDropdown();
+        
+        if (regCard) regCard.classList.remove('hidden');
+        if (rosterListContainer) rosterListContainer.className = "lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4";
+      }
+      document.getElementById('authScreen').classList.add('hidden');
+    }
+
+    function logoutSession(recordHistory = true) {
+      if (recordHistory) pushNavState({ screen: 'auth' }, 'Sign In', '#login');
+      currentLoggedUser = null;
+      currentHospitalName = "";
+      localStorage.removeItem('ayushcare_session');
+      hideAuthAlert();
+      updateHospitalNameDisplays();
+      document.getElementById('patientSection').classList.add('hidden');
+      document.getElementById('hospitalSection').classList.add('hidden');
+      document.getElementById('authScreen').classList.remove('hidden');
+    }
+
+    function updateHospitalNameDisplays() {
+      const title = currentHospitalName ? currentHospitalName.toUpperCase() : "HOSPITAL";
+      document.getElementById('printHospitalTitle').textContent = title;
+      document.getElementById('hospitalModeBannerTitle').textContent = `${title} OPD DESK`;
+      if (hospitalLogoUrl) {
+        document.getElementById('hospitalBannerLogo').src = hospitalLogoUrl;
+        document.getElementById('printHospitalLogo').src = hospitalLogoUrl;
+      }
+      const docHosp = document.getElementById('docHospitalName');
+      if (docHosp) docHosp.value = currentHospitalName || "";
+      populateHospitalFilterDropdown();
+    }
+
+    function populateHospitalFilterDropdown() {
+      const filterHosp = document.getElementById('filterHospital');
+      if (!filterHosp) return;
+      const currentVal = filterHosp.value;
+      const uniqueHospitals = Array.from(new Set(doctors.map(d => d.hospital)));
+      
+      filterHosp.innerHTML = '<option value="All">All Hospitals</option>';
+      uniqueHospitals.forEach(h => {
+        const opt = document.createElement('option');
+        opt.value = h;
+        opt.textContent = h;
+        filterHosp.appendChild(opt);
+      });
+      if (uniqueHospitals.includes(currentVal)) {
+        filterHosp.value = currentVal;
+      }
+    }
+
+    function switchPatientTab(tabNum, recordHistory = true) {
+      if (recordHistory) pushNavState({ screen: 'patient', tab: tabNum }, 'Patient Tab ' + tabNum, '#patient-tab' + tabNum);
+      [1, 2, 3, 4].forEach(num => {
+        const page = document.getElementById(`ptPage${num}`);
+        if (page) page.classList.toggle('hidden', num !== tabNum);
+        const tabBtn = document.getElementById(`ptTab${num}`);
+        if (tabBtn) {
+          if (num === tabNum) {
+            tabBtn.className = "tab-active-patient px-5 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl";
+          } else {
+            tabBtn.className = "px-5 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl";
+          }
+        }
+      });
+      if (tabNum === 1) generatePatientQR();
+      if (tabNum === 2) renderPatientDoctors();
+      if (tabNum === 3) renderPatientReports();
+      if (tabNum === 4) renderPatientAppointments();
+    }
+
+    function renderPatientAppointments() {
+      const tbody = document.getElementById('patientAppointmentsBody');
+      const badge = document.getElementById('patientBookingCountBadge');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+
+      const curUser = currentLoggedUser || {
+        name: document.getElementById('pFullName')?.value || "Patient",
+        email: document.getElementById('pEmail')?.value || "",
+        patientId: patientUniqueId
+      };
+
+      const userBookings = patientBookings.filter(b => 
+        (b.patientEmail && curUser.email && b.patientEmail.toLowerCase() === curUser.email.toLowerCase()) ||
+        (b.patientId && patientUniqueId && b.patientId === patientUniqueId) ||
+        (b.patientId && curUser.patientId && b.patientId === curUser.patientId) ||
+        (b.patientName && curUser.name && b.patientName.toLowerCase().includes(curUser.name.toLowerCase()))
+      ).sort(queueSort);
+
+      if (badge) badge.textContent = userBookings.length;
+
+      if (userBookings.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">You have 0 active token bookings. Go to '2. Book Specialist Doctor' to get a token.</td></tr>`;
+        return;
+      }
+
+      userBookings.forEach((b, idx) => {
+        const emergency = isEmergencyBooking(b);
+        const statusBadgeColor = 
+          emergency ? 'bg-rose-600 text-white font-black animate-pulse' :
+          b.queueStatus === 'Active' ? 'bg-emerald-100 text-emerald-800' :
+          b.queueStatus === 'On Hold' ? 'bg-amber-100 text-amber-800' : 'bg-teal-100 text-teal-800';
+
+        const tokenBadge = emergency
+          ? `<span class="font-black text-xs text-white bg-rose-600 px-3 py-1 rounded-xl border border-rose-700 shadow animate-pulse flex items-center gap-1 w-fit"><i class="fa-solid fa-triangle-exclamation"></i> ${b.tokenNumber || 'EMG-1'} (TREAT 1ST)</span>`
+          : `<span class="font-black text-xs text-teal-950 bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-300 shadow-sm font-mono tracking-wider">Token #${b.tokenNumber || '001'}</span>`;
+
+        const tr = document.createElement('tr');
+        tr.className = emergency ? "bg-rose-50/80 border-l-4 border-rose-600" : (idx % 2 === 0 ? "bg-white" : "bg-slate-50/40");
+        tr.innerHTML = `
+          <td class="p-3">${tokenBadge}</td>
+          <td class="p-3">
+            <span class="font-bold text-slate-900 block">${b.hospital || '-'}</span>
+            <span class="text-[10px] text-teal-700 font-semibold">${b.dept || 'OPD'}</span>
+          </td>
+          <td class="p-3 font-semibold text-slate-900">${b.doctorName || '-'}</td>
+          <td class="p-3">
+            <span class="font-bold text-slate-800 block">${b.date || '-'}</span>
+            <span class="text-[10px] text-slate-400 font-mono">${b.slot || '-'}</span>
+          </td>
+          <td class="p-3 text-center">
+            <span class="px-2.5 py-1 rounded-full text-[10px] font-bold ${statusBadgeColor}">
+              ${emergency ? 'Emergency Priority' : (b.queueStatus || 'Active')}
+            </span>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function checkRealtimeTokenAlerts() {
+      if (!currentLoggedUser || currentLoggedUser.role !== 'patient') return;
+
+      const userBookings = patientBookings.filter(b => 
+        (b.patientEmail && b.patientEmail.toLowerCase() === currentLoggedUser.email.toLowerCase()) ||
+        (b.patientId && b.patientId === patientUniqueId) ||
+        (b.patientName && b.patientName.toLowerCase() === currentLoggedUser.name.toLowerCase())
+      );
+
+      const today = new Date().toISOString().split('T')[0];
+      let alertTriggered = false;
+      let alertMsg = "";
+
+      userBookings.forEach(b => {
+        if (b.date === today) {
+          const hospitalQueue = patientBookings.filter(item => 
+            item.hospital === b.hospital && item.doctorName === b.doctorName && item.date === today
+          ).sort((x, y) => (x.rawToken || 0) - (y.rawToken || 0));
+
+          const activeTokenObj = hospitalQueue[0];
+          
+          if (activeTokenObj && b.rawToken) {
+            const tokenDifference = b.rawToken - activeTokenObj.rawToken;
+            if (tokenDifference > 0 && tokenDifference <= 3) {
+              alertTriggered = true;
+              alertMsg = `Alert! You are Token #${b.tokenNumber} for ${b.doctorName}. Current active token is Token #${activeTokenObj.tokenNumber} (${tokenDifference} tokens away)!`;
+            } else if (tokenDifference === 0) {
+              alertTriggered = true;
+              alertMsg = `Urgent Alert! Your Token #${b.tokenNumber} with ${b.doctorName} is CURRENTLY CALLED! Please proceed to the chamber immediately.`;
+            }
+          }
+        }
+      });
+
+      const banner = document.getElementById('liveAlertBanner');
+      if (alertTriggered) {
+        document.getElementById('liveAlertText').textContent = alertMsg;
+        banner.classList.remove('hidden');
+      }
+    }
+
+    function dismissTokenAlert() {
+      document.getElementById('liveAlertBanner').classList.add('hidden');
+    }
+
+    function renderPatientReports() {
+      const container = document.getElementById('patientReportsContainer');
+      const badge = document.getElementById('reportCountBadge');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const curUser = currentLoggedUser || {
+        name: document.getElementById('pFullName')?.value || "Patient",
+        email: document.getElementById('pEmail')?.value || "",
+        patientId: patientUniqueId
+      };
+
+      const myId = String((curUser && curUser.patientId) || patientUniqueId || '').trim().toLowerCase();
+      const myEmail = String((curUser && curUser.email) || '').trim().toLowerCase();
+      const myName = String((curUser && curUser.name) || '').trim().toLowerCase();
+
+      let allReports = [...patientReports];
+      try {
+        const cached = JSON.parse(localStorage.getItem('ayushcare_reports') || '[]');
+        cached.forEach(cr => {
+          if (!allReports.some(r => r.id === cr.id)) allReports.push(cr);
+        });
+      } catch (e) {}
+
+      const userReports = allReports.filter(r => {
+        if (!r) return false;
+        const rId = String(r.patientId || '').trim().toLowerCase();
+        const rEmail = String(r.patientEmail || '').trim().toLowerCase();
+        const rName = String(r.patientName || '').trim().toLowerCase();
+
+        const idMatch = myId && rId && (rId === myId || rId.includes(myId) || myId.includes(rId));
+        const emailMatch = myEmail && rEmail && (rEmail === myEmail);
+        const nameMatch = myName && rName && (rName === myName || rName.includes(myName) || myName.includes(rName));
+
+        return idMatch || emailMatch || nameMatch;
+      }).sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
+
+      if (badge) badge.textContent = userReports.length;
+      if (userReports.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-2 text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-300 p-6 space-y-2">
+            <i class="fa-solid fa-folder-open text-3xl text-slate-300"></i>
+            <p class="text-xs font-bold text-slate-600">No medical reports uploaded yet.</p>
+            <p class="text-[11px] text-slate-400">Reports uploaded by hospital departments or treating doctors will appear here automatically.</p>
+            <p class="text-[11px] font-mono text-teal-700 font-bold">Your Unique ID: ${myId.toUpperCase() || patientUniqueId || 'N/A'}</p>
+          </div>`;
+        return;
+      }
+
+      userReports.forEach(rep => {
+        const item = document.createElement('div');
+        item.className = 'p-5 border rounded-2xl bg-white shadow-sm hover:shadow-md transition flex flex-col justify-between space-y-3 border-slate-200';
+        const safeId = String(rep.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        item.innerHTML = `
+          <div>
+            <div class="flex justify-between items-start">
+              <span class="bg-teal-100 text-teal-800 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                <i class="fa-solid fa-file-medical mr-1"></i> ${rep.category || 'Medical Report'}
+              </span>
+              <span class="text-[11px] font-medium text-slate-400 font-mono">${rep.date || ''}</span>
+            </div>
+            <h4 class="font-bold text-sm text-slate-800 mt-2.5 line-clamp-1">${rep.title || rep.fileName || 'Diagnostic Report'}</h4>
+            <div class="mt-2 space-y-1 text-xs text-slate-500 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+              <p class="flex items-center justify-between"><span class="text-slate-400">Hospital:</span> <span class="font-semibold text-slate-700">${rep.hospital || currentHospitalName}</span></p>
+              <p class="flex items-center justify-between"><span class="text-slate-400">Doctor:</span> <span class="font-semibold text-slate-700">${rep.doctor || 'OPD Consultant'}</span></p>
+              <p class="flex items-center justify-between"><span class="text-slate-400">File:</span> <span class="font-mono text-slate-600 truncate max-w-[160px]">${rep.fileName || 'Document'}</span></p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onclick="viewPatientReport('${safeId}')" class="bg-teal-700 hover:bg-teal-800 text-white py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-sm">
+              <i class="fa-solid fa-eye"></i> <span>View Report</span>
+            </button>
+            <button type="button" onclick="downloadPatientReport('${safeId}')" class="bg-slate-800 hover:bg-slate-900 text-white py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-sm">
+              <i class="fa-solid fa-download"></i> <span>Download</span>
+            </button>
+          </div>`;
+        container.appendChild(item);
+      });
+    }
+
+    function viewPatientReport(reportId) {
+      const rep = patientReports.find(r => String(r.id) === String(reportId));
+      if (!rep) { alert('Report not found in records.'); return; }
+      const url = rep.dataUrl || rep.fileUrl;
+      if (!url) { alert('Report content URL is unavailable.'); return; }
+
+      document.getElementById('prevRepTitle').textContent = rep.title || rep.fileName || 'Diagnostic Report';
+      document.getElementById('prevRepCategory').textContent = rep.category || 'Medical Report';
+      document.getElementById('prevRepFileName').textContent = `File: ${rep.fileName || 'Document'}`;
+
+      const dlBtn = document.getElementById('previewDownloadBtn');
+      if (dlBtn) dlBtn.onclick = () => downloadPatientReport(reportId);
+
+      const container = document.getElementById('reportPreviewContent');
+      container.innerHTML = '';
+
+      const isPdf = (rep.fileType && rep.fileType.includes('pdf')) || 
+                    (rep.fileName && rep.fileName.toLowerCase().endsWith('.pdf')) || 
+                    (url.startsWith('data:application/pdf'));
+
+      if (isPdf) {
+        const embed = document.createElement('iframe');
+        embed.src = url;
+        embed.className = 'w-full h-full rounded-xl border border-slate-200';
+        embed.style.minHeight = '520px';
+        container.appendChild(embed);
+      } else {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = rep.title || 'Diagnostic Report';
+        img.className = 'max-h-[520px] max-w-full mx-auto object-contain rounded-xl shadow-sm';
+        container.appendChild(img);
+      }
+      showModalFlex('reportPreviewModal');
+    }
+
+    function downloadPatientReport(reportId) {
+      const rep = patientReports.find(r => String(r.id) === String(reportId));
+      if (!rep) { alert('Report not found in records.'); return; }
+      const url = rep.dataUrl || rep.fileUrl;
+      if (!url) { alert('Report file URL is missing.'); return; }
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = rep.fileName || `${rep.category || 'Report'}_${rep.patientId || 'patient'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    function updatePatientDisplayName() {
+      const name = document.getElementById('pFullName').value || "";
+      document.getElementById('patientProfileDisplay').textContent = name;
+      document.getElementById('patientIDDisplay').textContent = `ID: ${patientUniqueId}`;
+    }
+
+    function generatePatientQR(e) {
+      if (e) e.preventDefault();
+      const pName = document.getElementById('pFullName')?.value || "Rahul Sharma";
+      const pId = document.getElementById('pUniqueId')?.value || patientUniqueId || "PAT-1001";
+      const pGender = document.getElementById('pGender')?.value || "Male";
+      const pAge = document.getElementById('pAge')?.value || "32";
+      const pBlood = document.getElementById('pBloodGroup')?.value || "O+";
+      const pPhone = document.getElementById('pPhone')?.value || "+91 9876543210";
+      const pEmail = document.getElementById('pEmail')?.value || "rahul.sharma@medmail.com";
+      const pReason = document.getElementById('pVisitReason')?.value || "Chronic Lumbar Spondylosis";
+
+      const payload = JSON.stringify({
+        n: pName,
+        id: pId,
+        gender: pGender,
+        a: pAge,
+        b: pBlood,
+        p: pPhone,
+        email: pEmail,
+        r: pReason,
+        t: Date.now()
+      });
+
+      const qrContainer = document.getElementById('qrcodeBox');
+      if (!qrContainer) return;
+      qrContainer.innerHTML = '';
+      
+      try {
+        new QRCode(qrContainer, {
+          text: payload,
+          width: 185,
+          height: 185,
+          colorDark: "#000000",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.M
+        });
+        document.getElementById('qrPatientTag').textContent = `${pName} (${pId}) • Age: ${pAge} (${pBlood})`;
+        document.getElementById('qrTimestampTag').textContent = `Dynamic Pass Generated: ${new Date().toLocaleTimeString()}`;
+      } catch (err) {}
+    }
+
+    async function savePatientRecord(e) {
+      if (e) e.preventDefault();
+
+      if (!currentLoggedUser || currentLoggedUser.role !== 'patient') {
+        alert('Please sign in as a patient to save the patient record.');
+        return;
+      }
+
+      const patientData = {
+        ...currentLoggedUser,
+        name: document.getElementById('pFullName').value.trim(),
+        patientId: document.getElementById('pUniqueId').value.trim() || patientUniqueId,
+        gender: document.getElementById('pGender').value,
+        age: document.getElementById('pAge').value.trim(),
+        blood: document.getElementById('pBloodGroup').value,
+        phone: document.getElementById('pPhone').value.trim(),
+        email: document.getElementById('pEmail').value.trim(),
+        dob: document.getElementById('pDOB').value,
+        emergencyContactName: document.getElementById('pEmergName').value.trim(),
+        emergencyContactRelationship: document.getElementById('pEmergRel').value.trim(),
+        emergencyContactPhone: document.getElementById('pEmergPhone').value.trim(),
+        insuranceProvider: document.getElementById('pInsuranceProv').value.trim(),
+        policyNumber: document.getElementById('pPolicyNum').value.trim(),
+        allergies: document.getElementById('pAllergiesList').value.trim(),
+        medications: document.getElementById('pMedicationsList').value.trim(),
+        visitReason: document.getElementById('pVisitReason').value.trim(),
+        updatedAt: new Date().toISOString()
+      };
+
+      try {
+        const snapshot = await db.ref('users').once('value');
+        const users = snapshot.val() || {};
+        const match = Object.entries(users).find(([key, user]) =>
+          user && user.patientId === patientData.patientId
+        );
+
+        if (match) {
+          await db.ref('users/' + match[0]).update(patientData);
+        } else {
+          await db.ref('users/user_' + Date.now()).set(patientData);
+        }
+
+        currentLoggedUser = patientData;
+        localStorage.setItem('ayushcare_session', JSON.stringify(patientData));
+        await addPatientToWaitingList(patientData);
+
+        const localIndex = registeredUsers.findIndex(u => u.patientId === patientData.patientId);
+        if (localIndex >= 0) registeredUsers[localIndex] = { ...registeredUsers[localIndex], ...patientData };
+
+        alert('Patient details saved and updated on Live Dynamic QR Pass.');
+        updatePatientDisplayName();
+        generatePatientQR();
+      } catch (error) {
+        alert('Could not save patient record: ' + error.message);
+      }
+    }
+
+    function renderPatientDoctors() {
+      const dept = document.getElementById('filterDepartment').value;
+      const hosp = document.getElementById('filterHospital').value;
+      const list = document.getElementById('patientDoctorsList');
+      if (!list) return;
+      list.innerHTML = '';
+
+      let filtered = doctors;
+      if (dept !== 'All') filtered = filtered.filter(d => d.dept === dept);
+      if (hosp !== 'All') filtered = filtered.filter(d => d.hospital === hosp);
+
+      if (filtered.length === 0) {
+        list.innerHTML = `
+          <div class="col-span-full text-center py-8 text-slate-400 bg-white rounded-2xl border border-slate-200">
+            <i class="fa-solid fa-user-doctor text-2xl mb-2"></i>
+            <p class="text-xs">No doctors currently listed for the selected department/hospital.</p>
+          </div>
+        `;
+        return;
+      }
+
+      filtered.forEach(doc => {
+        const isAvailable = doc.status === 'Available';
+        const card = document.createElement('div');
+        card.className = "bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-3 hover:shadow-md transition";
+        card.innerHTML = `
+          <div class="flex items-start space-x-3">
+            <img src="${doc.photo}" alt="${doc.name}" class="w-14 h-14 rounded-full object-cover border-2 ${isAvailable ? 'border-emerald-500' : 'border-rose-300'}" />
+            <div class="flex-1">
+              <span class="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 mb-1">
+                <i class="fa-solid fa-hospital mr-1"></i> ${doc.hospital}
+              </span>
+              <h3 class="font-bold text-sm text-slate-900">${doc.name}</h3>
+              <p class="text-xs text-teal-700 font-semibold">${doc.dept}</p>
+              <p class="text-[11px] text-slate-400">${doc.room}</p>
+            </div>
+          </div>
+          <div class="flex items-center justify-between pt-2 border-t text-xs">
+            <span class="font-bold px-2.5 py-0.5 rounded-full ${isAvailable ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
+              <i class="fa-solid fa-circle text-[7px] mr-1"></i> ${doc.status}
+            </span>
+            <button onclick="openBookingModal('${doc.id}')" ${!isAvailable ? 'disabled' : ''} class="px-3.5 py-1.5 rounded-xl font-bold text-xs transition ${isAvailable ? 'bg-teal-700 hover:bg-teal-800 text-white shadow-sm' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}">
+              Book Specialist
+            </button>
+          </div>
+        `;
+        list.appendChild(card);
+      });
+    }
+
+    function isEmergencyCaseType(caseType) {
+      return caseType && caseType !== "Normal OPD";
+    }
+
+    function updateScannedPriorityUI() {
+      const select = document.getElementById('scannedCaseType');
+      const badge = document.getElementById('scannedQueueModeBadge');
+      const notice = document.getElementById('scannedEmergencyNotice');
+      if (!select || !badge || !notice) return;
+
+      const emergency = isEmergencyCaseType(select.value);
+      badge.textContent = emergency ? "EMERGENCY PRIORITY" : "NORMAL QUEUE";
+      badge.className = emergency
+        ? "text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-1 rounded-lg"
+        : "text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg";
+      notice.classList.toggle('hidden', !emergency);
+    }
+
+    function getTodayLocalDate() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    function getNextTokenNumber(hospital, doctorName, date, isEmergency = false) {
+      const normDate = date || getTodayLocalDate();
+      const normHosp = String(hospital || currentHospitalName || '').trim().toLowerCase();
+
+      if (isEmergency) {
+        let maxEmg = 0;
+        const checkEmg = (tok) => {
+          if (!tok) return;
+          const m = String(tok).match(/EMG-(\d+)/i);
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (!isNaN(n) && n > maxEmg) maxEmg = n;
+          }
+        };
+
+        (patientBookings || []).forEach(b => {
+          if (!b) return;
+          const bHosp = String(b.hospital || '').trim().toLowerCase();
+          const bDate = b.date || '';
+          if (bDate === normDate && (!normHosp || !bHosp || bHosp === normHosp)) {
+            checkEmg(b.tokenNumber);
+          }
+        });
+
+        (visitLogs || []).forEach(l => {
+          if (!l) return;
+          const lHosp = String(l.hospital || '').trim().toLowerCase();
+          const lTime = String(l.time || '');
+          if (lTime.includes(normDate) && (!normHosp || !lHosp || lHosp === normHosp)) {
+            checkEmg(l.tokenNumber);
+          }
+        });
+
+        const nextEmgNum = maxEmg + 1;
+        return {
+          tokenNumber: `EMG-${nextEmgNum}`,
+          rawToken: 0
+        };
+      }
+
+      let maxToken = 0;
+      const checkTok = (tok, rawTok) => {
+        let num = Number(rawTok);
+        if (!num || isNaN(num) || num <= 0) {
+          const str = String(tok || '').trim();
+          if (/^\d+$/.test(str)) {
+            num = parseInt(str, 10);
+          } else {
+            const m = str.match(/\b\d+\b/);
+            if (m) num = parseInt(m[0], 10);
+          }
+        }
+        if (num && !isNaN(num) && num > maxToken) {
+          maxToken = num;
+        }
+      };
+
+      (patientBookings || []).forEach(b => {
+        if (!b || isEmergencyBooking(b)) return;
+        const bHosp = String(b.hospital || '').trim().toLowerCase();
+        const bDate = b.date || '';
+        if (bDate === normDate && (!normHosp || !bHosp || bHosp === normHosp)) {
+          checkTok(b.tokenNumber, b.rawToken);
+        }
+      });
+
+      (visitLogs || []).forEach(l => {
+        if (!l) return;
+        const lTok = String(l.tokenNumber || '');
+        if (lTok.toUpperCase().startsWith('EMG') || lTok.toLowerCase() === 'walk-in') return;
+        const lHosp = String(l.hospital || '').trim().toLowerCase();
+        const lTime = String(l.time || '');
+        if (lTime.includes(normDate) && (!normHosp || !lHosp || lHosp === normHosp)) {
+          checkTok(l.tokenNumber, l.rawToken);
+        }
+      });
+
+      const nextRaw = maxToken + 1;
+      return {
+        tokenNumber: String(nextRaw).padStart(3, '0'),
+        rawToken: nextRaw
+      };
+    }
+
+    async function addScannedPatientToTokenQueue() {
+      const patient = lastScannedPatientData;
+      if (!patient) {
+        alert("Scan a valid patient QR code first.");
+        return;
+      }
+
+      const doctorValue = document.getElementById('logDoctorSelect')?.value || "";
+      if (!doctorValue) {
+        alert("Please select an available doctor/specialist first.");
+        return;
+      }
+
+      const doctorName = doctorValue.split(' (')[0];
+      const doctor = doctors.find(d =>
+        d.name === doctorName &&
+        d.hospital &&
+        d.hospital.toLowerCase() === currentHospitalName.toLowerCase()
+      );
+      if (!doctor) {
+        alert("The selected doctor is not available in the current hospital roster.");
+        return;
+      }
+
+      const caseType = document.getElementById('scannedCaseType')?.value || "Normal OPD";
+      const note = document.getElementById('scannedQueueNote')?.value.trim() || "";
+      const emergency = isEmergencyCaseType(caseType);
+      const today = getTodayLocalDate();
+
+      const duplicate = patientBookings.find(b =>
+        b.queueStatus !== 'Over' &&
+        b.patientId === patient.patientId &&
+        b.date === today &&
+        b.hospital &&
+        b.hospital.toLowerCase() === currentHospitalName.toLowerCase()
+      );
+      if (duplicate) {
+        alert(`This patient already has an active token for today: ${duplicate.tokenNumber || 'EMG'}.`);
+        switchHospitalTab('bookings');
+        return;
+      }
+
+      const now = Date.now();
+      const bookingId = 'booking_' + now;
+
+      const tokInfo = getNextTokenNumber(doctor.hospital || currentHospitalName, doctor.name, today, emergency);
+      let tokenNum = tokInfo.tokenNumber;
+      let rawTok = tokInfo.rawToken;
+
+      const booking = {
+        id: bookingId,
+        tokenNumber: tokenNum,
+        rawToken: rawTok,
+        patientName: emergency ? `${patient.name || patient.n || "Patient"} [EMERGENCY]` : (patient.name || patient.n || "Unknown Patient"),
+        patientId: patient.patientId || patient.id || "N/A",
+        patientEmail: patient.email || "",
+        phone: patient.phone || "",
+        blood: patient.blood || patient.b || "",
+        age: patient.age || patient.a || "",
+        gender: patient.gender || "Not specified",
+        hospital: doctor.hospital || currentHospitalName,
+        doctorName: doctor.name,
+        dept: doctor.dept || "OPD",
+        slot: emergency ? "Immediate Priority" : "QR Walk-in",
+        date: today,
+        queueStatus: emergency ? "Emergency Priority" : "Active",
+        revisitStatus: emergency ? `Emergency: ${caseType}` : (note || "QR Check-in"),
+        priority: emergency ? "Emergency" : "Normal",
+        priorityLevel: emergency ? 1 : 99,
+        priorityReason: emergency ? `${caseType}${note ? " — " + note : ""}` : caseType,
+        priorityCreatedAt: emergency ? now : null,
+        createdAt: now,
+        source: "QR Code"
+      };
+
+      patientBookings.push(booking);
+      resequenceQueueNumbers();
+
+      renderHospitalBookings();
+      renderPatientAppointments();
+      switchHospitalTab('bookings');
+
+      if (emergency) {
+        alert(`🚨 Emergency priority token created for ${booking.patientName}!\nToken: ${booking.tokenNumber} (TOP PRIORITY - TREAT 1ST)\nAssigned Doctor: ${booking.doctorName}`);
+      } else {
+        alert(`🎉 Token #${booking.tokenNumber} created for ${booking.patientName}!\nAssigned Doctor: ${booking.doctorName}\nQueue Position: Active`);
+      }
+
+      try {
+        await db.ref('bookings/' + bookingId).set(booking);
+      } catch (error) {}
+    }
+
+    function showModalFlex(id, recordHistory = true) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('hidden');
+      el.classList.add('flex');
+      if (recordHistory) pushNavState({ modal: id }, 'Modal', '#modal-' + id);
+      updateHeaderBackButton();
+    }
+
+    function hideModalFlex(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('hidden');
+      el.classList.remove('flex');
+    }
+
+    function openBookingModal(docId) {
+      currentSelectedDoctor = doctors.find(d => String(d.id) === String(docId));
+      const detailBox = document.getElementById('modalDoctorDetails');
+      detailBox.innerHTML = `
+        <div class="flex items-center space-x-3">
+          <img src="${currentSelectedDoctor.photo}" class="w-12 h-12 rounded-full object-cover border-2 border-teal-600" />
+          <div>
+            <h4 class="font-bold text-slate-900 text-sm">${currentSelectedDoctor.name}</h4>
+            <p class="text-xs text-teal-700 font-semibold">${currentSelectedDoctor.dept}</p>
+            <p class="text-xs font-bold text-amber-800"><i class="fa-solid fa-hospital mr-1"></i> ${currentSelectedDoctor.hospital}</p>
+            <p class="text-[10px] text-slate-400">${currentSelectedDoctor.room}</p>
+          </div>
+        </div>
+      `;
+      document.getElementById('bookDate').valueAsDate = new Date();
+      document.getElementById('bookingModal').classList.remove('hidden');
+    }
+
+    function closeBookingModal() {
+      document.getElementById('bookingModal').classList.add('hidden');
+    }
+
+    function confirmAppointment() {
+      if (!currentSelectedDoctor) {
+        alert("Please select a doctor first.");
+        return;
+      }
+
+      const slot = document.getElementById('bookSlot')?.value || "09:30 AM - 10:00 AM (Morning OPD)";
+      const dateInput = document.getElementById('bookDate');
+      const date = (dateInput && dateInput.value) ? dateInput.value : getTodayLocalDate();
+
+      const prioritySelect = document.getElementById('bookPriority');
+      const isEmergency = prioritySelect ? (prioritySelect.value === 'Emergency') : false;
+
+      const pName = document.getElementById('pFullName')?.value?.trim() || (currentLoggedUser && currentLoggedUser.name) || "Patient";
+      const pEmail = document.getElementById('pEmail')?.value?.trim() || (currentLoggedUser && currentLoggedUser.email) || "";
+      const pPhone = document.getElementById('pPhone')?.value?.trim() || "";
+      const pBlood = document.getElementById('pBloodGroup')?.value?.trim() || "";
+      const pAge = document.getElementById('pAge')?.value?.trim() || "";
+      const pGender = document.getElementById('pGender')?.value?.trim() || "Not specified";
+      const pId = patientUniqueId || (currentLoggedUser && currentLoggedUser.patientId) || ("PAT-" + Math.floor(1000 + Math.random() * 9000));
+
+      const now = Date.now();
+      const bookingId = 'booking_' + now;
+
+      const tokInfo = getNextTokenNumber(currentSelectedDoctor.hospital, currentSelectedDoctor.name, date, isEmergency);
+      let tokenNum = tokInfo.tokenNumber;
+      let rawTok = tokInfo.rawToken;
+
+      const newBooking = {
+        id: bookingId,
+        tokenNumber: tokenNum,
+        rawToken: rawTok,
+        patientName: isEmergency ? `${pName} [EMERGENCY]` : pName,
+        patientId: pId,
+        patientEmail: pEmail,
+        phone: pPhone,
+        blood: pBlood,
+        age: pAge,
+        gender: pGender,
+        hospital: currentSelectedDoctor.hospital,
+        doctorName: currentSelectedDoctor.name,
+        dept: currentSelectedDoctor.dept,
+        slot: isEmergency ? "Immediate Priority" : slot,
+        date: date,
+        queueStatus: isEmergency ? "Emergency Priority" : "Active",
+        revisitStatus: isEmergency ? "Critical Emergency" : "Scheduled OPD",
+        priority: isEmergency ? "Emergency" : "Normal",
+        priorityLevel: isEmergency ? 1 : 99,
+        priorityReason: isEmergency ? "Critical Emergency Priority — Treat 1st" : "Scheduled OPD",
+        priorityCreatedAt: isEmergency ? now : null,
+        createdAt: now,
+        source: "Appointment"
+      };
+
+      if (!patientUniqueId) patientUniqueId = pId;
+      if (!currentLoggedUser) {
+        currentLoggedUser = { name: pName, email: pEmail, role: 'patient', patientId: pId };
+      }
+
+      const existingIdx = patientBookings.findIndex(b => b.id === bookingId);
+      if (existingIdx >= 0) {
+        patientBookings[existingIdx] = newBooking;
+      } else {
+        patientBookings.push(newBooking);
+      }
+
+      resequenceQueueNumbers();
+      closeBookingModal();
+
+      alert(`🎉 Appointment Confirmed with ${currentSelectedDoctor.name}!\n\nPatient: ${pName} (${pId})\nDate: ${date} | Slot: ${slot}\n\n🏷️ ISSUED TOKEN NUMBER: ${tokenNum}\n\nProceed to Tab 4 (My Appointments) to view your token.`);
+
+      switchPatientTab(4);
+      renderPatientAppointments();
+      renderHospitalBookings();
+
+      try {
+        db.ref('bookings/' + bookingId).set(newBooking).catch(err => {});
+      } catch(e) {}
+    }
+
+    function switchHospitalTab(tabName, recordHistory = true) {
+      if (recordHistory) pushNavState({ screen: 'hospital', tab: tabName }, 'Hospital ' + tabName, '#hospital-' + tabName);
+      document.getElementById('hospPageIngestion').classList.toggle('hidden', tabName !== 'ingestion');
+      document.getElementById('hospPageBookings').classList.toggle('hidden', tabName !== 'bookings');
+      document.getElementById('hospPageLogs').classList.toggle('hidden', tabName !== 'logs');
+      document.getElementById('hospPageSummary').classList.toggle('hidden', tabName !== 'summary');
+      document.getElementById('hospPageDoctors').classList.toggle('hidden', tabName !== 'doctors');
+
+      document.getElementById('hospTabIngestion').className = tabName === 'ingestion' ? 'tab-active-hospital px-4 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl' : 'px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl';
+      document.getElementById('hospTabBookings').className = tabName === 'bookings' ? 'tab-active-hospital px-4 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl' : 'px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl';
+      document.getElementById('hospTabLogs').className = tabName === 'logs' ? 'tab-active-hospital px-4 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl' : 'px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl';
+      document.getElementById('hospTabSummary').className = tabName === 'summary' ? 'tab-active-hospital px-4 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl' : 'px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl';
+      document.getElementById('hospTabDoctors').className = tabName === 'doctors' ? 'tab-active-hospital px-4 py-2.5 text-xs md:text-sm flex items-center whitespace-nowrap rounded-xl' : 'px-4 py-2.5 text-xs md:text-sm text-slate-500 hover:text-slate-700 flex items-center whitespace-nowrap rounded-xl';
+
+      if (tabName === 'bookings') renderHospitalBookings();
+      if (tabName === 'logs') renderHospitalLogs();
+      if (tabName === 'summary') syncPrintSummaryData();
+      if (tabName === 'doctors') renderHospitalRoster();
+    }
+
+    let lastScannedPatientData = null;
+
+    function toggleLiveCameraScanner() {
+      const box = document.getElementById('cameraScannerBox');
+      const btnLabel = document.getElementById('cameraBtnLabel');
+
+      if (!isCameraRunning) {
+        box.classList.remove('hidden');
+        btnLabel.textContent = "Stop Camera Scanner";
+        html5QrCodeScanner = new Html5Qrcode("qr-reader");
+        html5QrCodeScanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText) => {
+            try {
+              const data = JSON.parse(decodedText);
+              applyScannedPatientData(data);
+              alert(`Successfully scanned QR code for: ${data.n || data.name || 'Patient'}`);
+            } catch (err) {
+              applyScannedPatientData({ n: decodedText, r: "Scanned via Camera QR Pass", b: "O+", a: "32", p: "+91 9876543210", id: "PAT-QR-001" });
+            }
+            if (html5QrCodeScanner) {
+              html5QrCodeScanner.stop().then(() => {
+                box.classList.add('hidden');
+                btnLabel.textContent = "Start Camera Scanner";
+                isCameraRunning = false;
+              }).catch(e => {
+                box.classList.add('hidden');
+                btnLabel.textContent = "Start Camera Scanner";
+                isCameraRunning = false;
+              });
+            }
+          },
+          (error) => {}
+        ).catch(err => {
+          alert("Camera error: " + err);
+          box.classList.add('hidden');
+          btnLabel.textContent = "Start Camera Scanner";
+          isCameraRunning = false;
+        });
+        isCameraRunning = true;
+      } else {
+        if (html5QrCodeScanner) {
+          html5QrCodeScanner.stop().then(() => {
+            box.classList.add('hidden');
+            btnLabel.textContent = "Start Camera Scanner";
+            isCameraRunning = false;
+          });
+        }
+      }
+    }
+
+    function handleQRImageUpload(event) {
+      if (event.target.files && event.target.files[0]) {
+        const file = event.target.files[0];
+        const html5QrCode = new Html5Qrcode("qr-file-reader");
+        html5QrCode.scanFile(file, true)
+          .then(decodedText => {
+            try {
+              const data = JSON.parse(decodedText);
+              applyScannedPatientData(data);
+              alert(`Successfully scanned QR image for: ${data.n || data.name || 'Patient'}`);
+            } catch (e) {
+              applyScannedPatientData({ n: decodedText, r: "Scanned via Uploaded QR Image", b: "O+", a: "32", p: "+91 9876543210", id: "PAT-QR-001" });
+            }
+          })
+          .catch(err => {
+            alert("Could not decode QR code from image file. Try another image or use simulation.");
+          });
+      }
+    }
+
+    function simulateScanPatient() {
+      const pName = document.getElementById('pFullName')?.value || "Rahul Sharma";
+      const pId = patientUniqueId || "PAT-1001";
+      const mockData = {
+        n: pName,
+        id: pId,
+        gender: "Male",
+        a: "32",
+        b: "O+",
+        p: "+91 9876543210",
+        email: "rahul.sharma@medmail.com",
+        avatar: patientAvatarUrl,
+        r: "Chronic Lumbar Spondylosis with Lower Back Nerve Compression"
+      };
+      applyScannedPatientData(mockData);
+      alert(`Simulated QR Scan successful for ${pName}!`);
+    }
+
+    function applyScannedPatientData(data) {
+      const card = document.getElementById('scannedPatientCard');
+      card.classList.remove('hidden');
+      card.style.display = 'block';
+
+      if (data.avatar) document.getElementById('scannedPatientAvatar').src = data.avatar;
+
+      const pName = data.n || data.name || "Unknown Patient";
+      const pId = data.id || data.patientId || "PAT-1001";
+      const pGender = data.gender || "Male";
+      const pAge = data.a || data.age || "32";
+      const pBlood = data.b || data.blood || "O+";
+      const pPhone = data.p || data.phone || "+91 9876543210";
+      const pEmail = data.email || "patient@ayushcare.in";
+      const pReason = data.r || data.visitReason || "OPD Consultation";
+
+      lastScannedPatientData = {
+        name: pName,
+        patientId: pId,
+        gender: pGender,
+        age: pAge,
+        blood: pBlood,
+        phone: pPhone,
+        email: pEmail,
+        visitReason: pReason,
+        avatar: data.avatar || patientAvatarUrl
+      };
+
+      document.getElementById('scanName').textContent = `${pName} (ID: ${pId})`;
+      document.getElementById('scanMeta').textContent = `Email: ${pEmail} | Gender: ${pGender} | Phone: ${pPhone}`;
+      document.getElementById('scanComplaints').textContent = pReason;
+      document.getElementById('scanBloodAge').textContent = `ID: ${pId} | Gender: ${pGender} | Age: ${pAge} Yrs | Blood: ${pBlood}`;
+      document.getElementById('scanVisitBadge').textContent = `Visit #${patientVisitCount}`;
+      document.getElementById('logPurpose').value = pReason;
+
+      currentTreatedPatient = {
+        name: pName,
+        patientName: pName,
+        patientId: pId,
+        id: pId,
+        gender: pGender,
+        age: pAge,
+        blood: pBlood,
+        phone: pPhone,
+        email: pEmail,
+        doctor: document.getElementById('logDoctorSelect')?.value || (doctors[0] ? doctors[0].name : "Consulting Physician"),
+        diagnosis: pReason,
+        purpose: pReason,
+        date: new Date().toISOString().split('T')[0]
+      };
+      updatePrintMedicalSummary(currentTreatedPatient);
+    }
+
+    async function commitVisitLog() {
+      const scanNameText = document.getElementById('scanName').textContent || '';
+      const pName = scanNameText.split(' (ID:')[0] || 'Patient';
+      const pId = lastScannedPatientData?.patientId || patientUniqueId;
+      const doc = document.getElementById('logDoctorSelect').value || 'Hospital OPD';
+      const purpose = document.getElementById('logPurpose').value || 'OPD Consultation';
+      const today = new Date().toISOString().split('T')[0];
+
+      try {
+        const activeBooking = patientBookings.find(b =>
+          b && b.hospital && b.hospital.toLowerCase() === currentHospitalName.toLowerCase() &&
+          b.patientId === pId && b.date === today && b.queueStatus !== 'Over'
+        );
+
+        if (activeBooking) {
+          await confirmMarkOver(
+            activeBooking.id, activeBooking.patientName || pName, activeBooking.patientId || pId,
+            activeBooking.tokenNumber || '001', activeBooking.doctorName || doc, activeBooking.date || today
+          );
+          return;
+        }
+
+        const safeId = String(pId || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const logId = `log_walkin_${safeId}_${today}`;
+        const newLog = {
+          id: logId, bookingId: '', time: `${today} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+          tokenNumber: "Walk-in", patientName: pName, patientId: pId, visitNum: patientVisitCount,
+          hospital: currentHospitalName, doctor: doc, purpose: purpose, abha: "ABHA-Verified", source: 'QR Code'
+        };
+
+        await db.ref('logs/' + logId).set(newLog);
+        patientVisitCount++;
+        document.getElementById('scanVisitBadge').textContent = `Visit #${patientVisitCount}`;
+        alert('Patient visit recorded in OPD Logs.');
+      } catch (error) {
+        alert('Could not create OPD log: ' + error.message);
+      }
+    }
+
+    function goToHospitalSummaryPrint() {
+      syncPrintSummaryData();
+      switchHospitalTab('summary');
+    }
+
+    function onTreatedDoctorOrPurposeChange() {
+      if (!currentTreatedPatient) currentTreatedPatient = {};
+      const docSelect = document.getElementById('logDoctorSelect');
+      if (docSelect && docSelect.value) currentTreatedPatient.doctor = docSelect.value;
+      const purpInput = document.getElementById('logPurpose');
+      if (purpInput && purpInput.value) {
+        currentTreatedPatient.diagnosis = purpInput.value;
+        currentTreatedPatient.purpose = purpInput.value;
+      }
+      updatePrintMedicalSummary(currentTreatedPatient);
+    }
+
+    function updatePrintMedicalSummary(p) {
+      if (!p) p = getFallbackActivePatient();
+      currentTreatedPatient = p;
+
+      const hospTitle = document.getElementById('printHospitalTitle');
+      if (hospTitle) hospTitle.textContent = (p.hospital || currentHospitalName || 'HOSPITAL OPD').toUpperCase();
+      const hospLogo = document.getElementById('printHospitalLogo');
+      if (hospLogo) hospLogo.src = hospitalLogoUrl || "https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=120&auto=format&fit=crop&q=80";
+      const currDate = document.getElementById('printCurrentDate');
+      if (currDate) currDate.textContent = p.date ? new Date(p.date).toLocaleDateString() : new Date().toLocaleDateString();
+
+      const pName = p.patientName || p.name || 'Patient';
+      const pId = p.patientId || p.id || patientUniqueId || 'PAT-1001';
+      const pGender = p.gender || 'Male';
+      const pAge = p.age || '32';
+      const pBlood = p.blood || p.bloodGroup || 'O+';
+      const pPhone = p.phone || '+91 9876543210';
+
+      if (document.getElementById('printName')) document.getElementById('printName').textContent = pName;
+      if (document.getElementById('printId')) document.getElementById('printId').textContent = pId;
+      if (document.getElementById('printGenderAge')) document.getElementById('printGenderAge').textContent = `${pGender}, ${pAge} Yrs`;
+      if (document.getElementById('printBloodGroup')) document.getElementById('printBloodGroup').textContent = pBlood;
+      if (document.getElementById('printPhone')) document.getElementById('printPhone').textContent = pPhone;
+
+      const doctorSelect = document.getElementById('logDoctorSelect');
+      const doctorTreated = p.doctor || p.doctorName || (doctorSelect && doctorSelect.value ? doctorSelect.value : (doctors[0] ? doctors[0].name + " (" + (doctors[0].hospital || currentHospitalName || "OPD") + ")" : "Consulting Physician"));
+      if (document.getElementById('printDoctorTreated')) document.getElementById('printDoctorTreated').textContent = doctorTreated;
+      if (document.getElementById('printDoctorSignature')) document.getElementById('printDoctorSignature').textContent = doctorTreated;
+
+      const purpInput = document.getElementById('logPurpose');
+      const disease = p.diagnosis || p.purpose || p.visitReason || (purpInput && purpInput.value) || "Chronic Lumbar Spondylosis with Lower Back Nerve Compression";
+      if (document.getElementById('printDisease')) document.getElementById('printDisease').textContent = disease;
+
+      if (document.getElementById('printDietAdvice')) {
+        document.getElementById('printDietAdvice').textContent = p.diet || "Avoid cold/sour foods, maintain spinal lumbar support, light morning walk.";
+      }
+      if (document.getElementById('printLabAdvice')) {
+        document.getElementById('printLabAdvice').textContent = p.labTests || "Review in 14 days with repeat Lumbar Spine X-ray report.";
+      }
+
+      const verifyPayload = JSON.stringify({
+        hospital: currentHospitalName,
+        patientId: pId,
+        patientName: pName,
+        token: p.tokenNumber || '001',
+        doctor: doctorTreated,
+        diagnosis: disease,
+        date: new Date().toISOString(),
+        hash: 'AYUSH-' + Math.random().toString(36).substring(2, 8).toUpperCase()
+      });
+      try {
+        const parsed = JSON.parse(verifyPayload);
+        if (document.getElementById('printVerifyHash')) document.getElementById('printVerifyHash').textContent = parsed.hash;
+        generateVerifiableQR('printVerifiableQr', verifyPayload);
+      } catch(e) {}
+    }
+
+    function getFallbackActivePatient() {
+      const scanNameElem = document.getElementById('scanName');
+      if (scanNameElem && scanNameElem.textContent && scanNameElem.textContent !== '-') {
+        const fullText = scanNameElem.textContent;
+        const namePart = fullText.split(' (ID:')[0] || fullText;
+        const idPart = (fullText.includes('(ID:') ? fullText.split('(ID:')[1].replace(')', '').trim() : '') || patientUniqueId;
+        return {
+          name: namePart, patientName: namePart, patientId: idPart, id: idPart,
+          gender: 'Male', age: '32', blood: 'O+', phone: '+91 9876543210'
+        };
+      }
+      return {
+        name: document.getElementById('pFullName')?.value || "Rahul Sharma",
+        patientName: document.getElementById('pFullName')?.value || "Rahul Sharma",
+        patientId: patientUniqueId || "PAT-1001",
+        id: patientUniqueId || "PAT-1001",
+        gender: document.getElementById('pGender')?.value || "Male",
+        age: document.getElementById('pAge')?.value || "32",
+        blood: document.getElementById('pBloodGroup')?.value || "O+",
+        phone: document.getElementById('pPhone')?.value || "+91 9876543210"
+      };
+    }
+
+    function syncPrintSummaryData() {
+      updatePrintMedicalSummary(currentTreatedPatient);
+    }
+
+    function openPatientSummaryFromLog(pId, pName, docName, encodedPurpose) {
+      const decodedPurpose = decodeURIComponent(encodedPurpose || '');
+      const uMatch = registeredUsers.find(u => u && u.patientId && String(u.patientId).toLowerCase() === String(pId).toLowerCase());
+      currentTreatedPatient = {
+        name: pName, patientName: pName, patientId: pId, id: pId,
+        gender: uMatch?.gender || 'Male', age: uMatch?.age || '32', blood: uMatch?.blood || 'O+',
+        phone: uMatch?.phone || '+91 9876543210', doctor: docName || 'Attending Doctor',
+        diagnosis: decodedPurpose || 'OPD Consultation Completed', purpose: decodedPurpose || 'OPD Consultation Completed',
+        date: new Date().toISOString().split('T')[0]
+      };
+      updatePrintMedicalSummary(currentTreatedPatient);
+      switchHospitalTab('summary');
+    }
+
+    function downloadSummaryPDF() {
+      const element = document.getElementById('printReportSection');
+      if (!element) return;
+      syncPrintSummaryData();
+      const patientName = document.getElementById('printName')?.textContent?.trim() || 'Patient';
+      const cleanFileName = `Medical_Summary_${patientName.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+
+      if (typeof html2pdf !== 'undefined') {
+        const opt = {
+          margin: [10, 10, 10, 10], filename: cleanFileName,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, logging: false },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        html2pdf().set(opt).from(element).save().catch(err => window.print());
+      } else {
+        window.print();
+      }
+    }
+
+    function downloadHospitalSummaryPDF() {
+      syncPrintSummaryData();
+      switchHospitalTab('summary');
+      setTimeout(() => downloadSummaryPDF(), 250);
+    }
+
+    function openDoctorConsultation(bookingId) {
+      const b = patientBookings.find(item => item.id === bookingId);
+      if (!b) return;
+      document.getElementById('consultBookingId').value = b.id;
+      document.getElementById('consultPatientName').textContent = b.patientName || 'Patient';
+      document.getElementById('consultPatientId').textContent = `${b.patientId || 'N/A'}`;
+      document.getElementById('consultTokenBadge').textContent = `Token #${b.tokenNumber || 'EMG'}`;
+      document.getElementById('consultComplaints').value = b.priorityReason || b.visitReason || "Severe lower back discomfort";
+      document.getElementById('consultDiagnosis').value = b.diagnosis || "Chronic Lumbar Spondylosis";
+      showModalFlex('doctorConsultationModal');
+    }
+
+    function addRxMedicineRow() {
+      const tbody = document.getElementById('consultRxTableBody');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="p-2"><input type="text" class="w-full p-1.5 border rounded-lg rx-med-name" placeholder="Drug name" required /></td>
+        <td class="p-2"><input type="text" class="w-full p-1.5 border rounded-lg rx-med-dose" value="500 mg" placeholder="Dose" /></td>
+        <td class="p-2"><select class="w-full p-1.5 border rounded-lg rx-med-freq"><option value="1 - 0 - 1">1-0-1 (BID)</option><option value="1 - 1 - 1">1-1-1 (TID)</option></select></td>
+        <td class="p-2"><select class="w-full p-1.5 border rounded-lg rx-med-time"><option value="After Food">After Food</option><option value="Before Food">Before Food</option></select></td>
+        <td class="p-2"><input type="number" class="w-16 p-1.5 border rounded-lg rx-med-days" value="7" min="1" /></td>
+        <td class="p-2 text-center"><button type="button" onclick="removeRxMedicineRow(this)" class="text-rose-500 hover:text-rose-700 p-1"><i class="fa-solid fa-trash-can"></i></button></td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    function removeRxMedicineRow(btn) {
+      const tr = btn.closest('tr');
+      if (tr && document.querySelectorAll('#consultRxTableBody tr').length > 1) tr.remove();
+    }
+
+    async function saveDoctorConsultation(e) {
+      e.preventDefault();
+      const bookingId = document.getElementById('consultBookingId').value;
+      const b = patientBookings.find(item => item.id === bookingId);
+      if (!b) return;
+
+      const diagnosis = document.getElementById('consultDiagnosis').value.trim();
+      const diet = document.getElementById('consultDiet').value.trim();
+      const labTests = document.getElementById('consultLabTests').value.trim();
+
+      const rows = document.querySelectorAll('#consultRxTableBody tr');
+      const medicines = [];
+      rows.forEach(r => {
+        const name = r.querySelector('.rx-med-name')?.value;
+        const dose = r.querySelector('.rx-med-dose')?.value;
+        const freq = r.querySelector('.rx-med-freq')?.value;
+        const time = r.querySelector('.rx-med-time')?.value;
+        const days = r.querySelector('.rx-med-days')?.value;
+        if (name) medicines.push({ name, dose, freq, time, days });
+      });
+
+      const uMatch = registeredUsers.find(u => u && u.patientId && b && String(u.patientId).toLowerCase() === String(b.patientId || '').toLowerCase());
+      currentTreatedPatient = {
+        name: b.patientName || 'Patient', patientName: b.patientName || 'Patient',
+        patientId: b.patientId || 'N/A', id: b.patientId || 'N/A',
+        tokenNumber: b.tokenNumber || '001', gender: b.gender || uMatch?.gender || 'Male',
+        age: b.age || uMatch?.age || '32', blood: b.blood || uMatch?.blood || 'O+',
+        phone: b.phone || uMatch?.phone || '+91 9876543210',
+        hospital: b.hospital || currentHospitalName,
+        doctor: b.doctorName || (doctors[0] ? doctors[0].name : "Attending Doctor"),
+        diagnosis: diagnosis || "Clinical Consultation Completed", purpose: diagnosis || "Clinical Consultation Completed",
+        diet: diet || "Avoid cold/sour foods.", labTests: labTests || "Review in 14 days.",
+        medicines: medicines, date: b.date || new Date().toISOString().split('T')[0]
+      };
+      updatePrintMedicalSummary(currentTreatedPatient);
+
+      hideModalFlex('doctorConsultationModal');
+      await confirmMarkOver(b.id, b.patientName, b.patientId || 'N/A', b.tokenNumber || '001', b.doctorName || 'Doctor', b.date || '', true);
+      switchHospitalTab('summary');
+    }
+
+    function generateVerifiableQR(containerId, text) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      container.innerHTML = '';
+      try {
+        if (typeof QRCode !== 'undefined') {
+          new QRCode(container, {
+            text: text, width: 76, height: 76, colorDark: "#0f172a", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M
+          });
+        }
+      } catch (e) {}
+    }
+
+    function filterHospitalLogs() {
+      const query = (document.getElementById('logSearchInput')?.value || '').toLowerCase().trim();
+      const hospitalLogs = visitLogs.filter(l => !l.hospital || l.hospital.toLowerCase() === currentHospitalName.toLowerCase());
+      if (!query) { renderHospitalLogs(hospitalLogs); return; }
+      const filtered = hospitalLogs.filter(log => {
+        const name = String(log.patientName || '').toLowerCase();
+        const id = String(log.patientId || '').toLowerCase();
+        const doc = String(log.doctor || '').toLowerCase();
+        return name.includes(query) || id.includes(query) || doc.includes(query);
+      });
+      renderHospitalLogs(filtered);
+    }
+
+    function toggleDoctorStatus(id) {
+      const doc = doctors.find(d => String(d.id) === String(id));
+      if (doc) {
+        doc.status = doc.status === 'Available' ? 'On Leave' : 'Available';
+        db.ref('doctors/' + id).update({ status: doc.status });
+        renderHospitalRoster();
+        renderPatientDoctors();
+        populateDoctorSelect();
+      }
+    }
+
+    function deleteDoctor(id) {
+      const target = doctors.find(d => String(d.id) === String(id));
+      if (!target) return;
+      if (confirm(`Remove ${target.name} from hospital roster?`)) {
+        db.ref('doctors/' + id).remove();
+        doctors = doctors.filter(d => String(d.id) !== String(id));
+        renderHospitalRoster();
+        renderPatientDoctors();
+        populateDoctorSelect();
+      }
+    }
+
+    function isEmergencyBooking(booking) {
+      if (!booking) return false;
+      return Boolean(
+        booking.priority === "Emergency" ||
+        booking.queueStatus === "Emergency Priority" ||
+        (typeof booking.tokenNumber === "string" && booking.tokenNumber.toUpperCase().startsWith("EMG")) ||
+        Number(booking.priorityLevel) === 1
+      );
+    }
+
+    function resequenceQueueNumbers() {
+      (patientBookings || []).forEach(b => {
+        if (!b || !b.id || b.queueStatus === 'Over') return;
+        if (!b.tokenNumber || !b.rawToken || b.tokenNumber === '000') {
+          const tokInfo = getNextTokenNumber(b.hospital, b.doctorName, b.date, isEmergencyBooking(b));
+          b.tokenNumber = tokInfo.tokenNumber;
+          b.rawToken = tokInfo.rawToken;
+          try { db.ref('bookings/' + b.id).update({ tokenNumber: b.tokenNumber, rawToken: b.rawToken }); } catch(e){}
+        }
+      });
+    }
+
+    function queueSort(a, b) {
+      const ae = isEmergencyBooking(a);
+      const be = isEmergencyBooking(b);
+      if (ae && !be) return -1;
+      if (!ae && be) return 1;
+      const tokA = Number(a.rawToken || 0);
+      const tokB = Number(b.rawToken || 0);
+      if (tokA > 0 && tokB > 0 && tokA !== tokB) return tokA - tokB;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    }
+
+    function renderHospitalBookings(bookingsToRender = null) {
+      const tbody = document.getElementById('hospitalBookingsBody');
+      const badge = document.getElementById('hospitalBookingsBadge');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+
+      const hospitalList = patientBookings.filter(b => b.hospital && b.hospital.toLowerCase() === currentHospitalName.toLowerCase() && b.queueStatus !== 'Over');
+      const list = bookingsToRender ? [...bookingsToRender].sort(queueSort) : [...hospitalList].sort(queueSort);
+      if (badge) badge.textContent = hospitalList.length;
+
+      if (!list.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400">No active tokens in queue for ${currentHospitalName}.</td></tr>`;
+        return;
+      }
+
+      list.forEach((b, index) => {
+        const emergency = isEmergencyBooking(b);
+        const status = b.queueStatus || "Active";
+        let statusClass = "bg-emerald-100 text-emerald-800";
+        if (status === "On Hold") statusClass = "bg-amber-100 text-amber-800";
+        if (emergency) statusClass = "bg-rose-600 text-white font-black animate-pulse";
+
+        const tokenHtml = emergency
+          ? `<span class="font-black text-xs md:text-sm text-white bg-rose-600 px-3 py-1 rounded-xl border border-rose-700 shadow flex items-center gap-1 w-fit"><i class="fa-solid fa-triangle-exclamation"></i> ${b.tokenNumber || 'EMG-1'}</span>`
+          : `<span class="font-black text-sm text-teal-950 bg-teal-50 px-3 py-1 rounded-xl border border-teal-200 shadow-sm font-mono">${b.tokenNumber || '001'}</span>`;
+
+        const queueLabel = emergency 
+          ? `<span class="inline-block mt-1 text-[9px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full uppercase">🚨 TREAT 1ST</span>` 
+          : `<span class="inline-block mt-1 text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">Queue #${index + 1}</span>`;
+
+        const reason = b.priorityReason || b.revisitStatus || "";
+        const safe = value => String(value ?? "").replace(/'/g, "\\'");
+
+        const tr = document.createElement('tr');
+        tr.className = emergency ? "bg-rose-50/80 border-l-4 border-rose-600" : (index % 2 === 0 ? "bg-white" : "bg-slate-50/40");
+        tr.innerHTML = `
+          <td class="p-3">${tokenHtml}<div class="mt-0.5">${queueLabel}</div></td>
+          <td class="p-3"><span class="font-bold text-slate-900 block">${b.date || '-'}</span><span class="text-[10px] text-slate-400 font-mono">${b.slot || '-'}</span></td>
+          <td class="p-3">
+            <p class="font-bold text-slate-900">${b.patientName || '-'} <span class="text-[10px] font-mono text-teal-700">(${b.patientId || 'N/A'})</span></p>
+            <p class="text-[10px] text-slate-500">Gender: ${b.gender || '-'} | Age: ${b.age || '-'} | Blood: <strong class="text-rose-600">${b.blood || '-'}</strong></p>
+            ${reason ? `<p class="text-[10px] ${emergency ? 'text-rose-700 font-bold' : 'text-slate-500'} mt-1">${reason}</p>` : ""}
+          </td>
+          <td class="p-3"><span class="font-semibold text-teal-900 block">${b.doctorName || 'Emergency Team'}</span><span class="text-[10px] text-slate-400">${b.dept || 'OPD'}</span></td>
+          <td class="p-3 text-center"><span class="px-2.5 py-1 rounded-full text-[10px] font-extrabold ${statusClass}">${emergency ? 'Emergency Priority' : status}</span></td>
+          <td class="p-3"><span class="text-[10px] font-bold ${b.source === 'QR Code' ? 'text-teal-700' : 'text-slate-500'}">${b.source || 'OPD'}</span></td>
+          <td class="p-3 text-center space-x-1">
+            <button onclick="announceToken('${safe(b.tokenNumber || 'EMG-1')}', '${safe(b.patientName || 'Patient')}', '${safe(b.room || 'Room 101')}', '${safe(b.doctorName || 'Doctor')}')" class="bg-teal-700 hover:bg-teal-800 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
+              <i class="fa-solid fa-bullhorn mr-0.5"></i> Call
+            </button>
+            <button onclick="openDoctorConsultation('${safe(b.id)}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded text-[10px] font-bold shadow-sm">
+              <i class="fa-solid fa-stethoscope mr-0.5"></i> Consult
+            </button>
+            <button onclick="confirmMarkOver('${safe(b.id)}', '${safe(b.patientName)}', '${safe(b.patientId || 'N/A')}', '${safe(b.tokenNumber || 'EMG-1')}', '${safe(b.doctorName || 'Emergency Team')}', '${safe(b.date || '')}')" class="bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1 rounded text-[10px] font-bold shadow">Over</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function confirmMarkOver(bookingId, patientName, patientId, tokenNum, doctorName, dateStr, skipConfirm = false) {
+      if (!skipConfirm && !confirm(`Complete OPD for ${tokenNum} (${patientName} - ID: ${patientId})?`)) return;
+
+      try {
+        const bookingRef = db.ref('bookings/' + bookingId);
+        const snap = await bookingRef.once('value');
+        const booking = snap.val();
+        if (!booking) { alert('Token already completed.'); return; }
+
+        const tx = await bookingRef.transaction(current => {
+          if (!current || current.queueStatus === 'Over') return;
+          return { ...current, queueStatus: 'Over', completedAt: Date.now() };
+        });
+
+        if (!tx.committed) return;
+
+        const completedBooking = tx.snapshot.val();
+        const logId = 'log_' + String(bookingId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const finalToken = completedBooking.tokenNumber || tokenNum || '001';
+        const finalRaw = completedBooking.rawToken || (parseInt(finalToken, 10) || 1);
+        const newLog = {
+          id: logId, bookingId: bookingId,
+          time: `${dateStr} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`,
+          tokenNumber: finalToken, rawToken: finalRaw,
+          hospital: completedBooking.hospital || currentHospitalName,
+          patientName: `${patientName} (${patientId})`, patientId: patientId,
+          visitNum: completedBooking.visitNum || "1", doctor: doctorName,
+          purpose: completedBooking.priorityReason || ("Completed Consultation"),
+          abha: "ABHA-Verified", source: completedBooking.source || "OPD"
+        };
+
+        await db.ref('logs/' + logId).set(newLog);
+        await bookingRef.remove();
+
+        const uMatch = registeredUsers.find(u => u && u.patientId && String(u.patientId).toLowerCase() === String(patientId).toLowerCase());
+        currentTreatedPatient = {
+          name: patientName, patientName: patientName, patientId: patientId, id: patientId,
+          tokenNumber: finalToken, gender: completedBooking.gender || uMatch?.gender || 'Male',
+          age: completedBooking.age || uMatch?.age || '32', blood: completedBooking.blood || uMatch?.blood || 'O+',
+          phone: completedBooking.phone || uMatch?.phone || '+91 9876543210', doctor: doctorName,
+          hospital: completedBooking.hospital || currentHospitalName,
+          diagnosis: completedBooking.priorityReason || completedBooking.visitReason || newLog.purpose,
+          purpose: completedBooking.priorityReason || completedBooking.visitReason || newLog.purpose,
+          date: dateStr || new Date().toISOString().split('T')[0]
+        };
+        updatePrintMedicalSummary(currentTreatedPatient);
+
+        resequenceQueueNumbers();
+        renderHospitalBookings();
+        renderHospitalLogs();
+      } catch (error) {
+        alert('Could not complete visit: ' + error.message);
+      }
+    }
+
+    function renderHospitalLogs(logsToRender = visitLogs) {
+      const tbody = document.getElementById('hospitalLogBody');
+      const badge = document.getElementById('totalLogsBadge');
+      if (!tbody) return;
+
+      const hospitalLogs = (logsToRender || []).filter(log => !log.hospital || log.hospital.toLowerCase() === currentHospitalName.toLowerCase());
+
+      const seen = new Set();
+      const uniqueLogs = hospitalLogs.filter(log => {
+        const key = log.bookingId || `${log.patientId || ''}|${log.tokenNumber || ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      if (badge) badge.textContent = uniqueLogs.length;
+      tbody.innerHTML = '';
+
+      if (uniqueLogs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400">No OPD logs recorded yet for ${currentHospitalName}. Logs appear here when staff mark patient tokens as "Over".</td></tr>`;
+        return;
+      }
+
+      uniqueLogs.forEach(log => {
+        const pId = log.patientId || 'N/A';
+        const pName = String(log.patientName || '').split(' (')[0] || 'Patient';
+        const safeId = String(pId).replace(/'/g, "\\'");
+        const safeName = String(pName).replace(/'/g, "\\'");
+        const safeDoc = String(log.doctor || '').replace(/'/g, "\\'");
+        const attachedCount = patientReports.filter(r => r && String(r.patientId || '').toLowerCase() === String(pId).toLowerCase()).length;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="p-3 font-mono text-slate-500 text-[11px]">${log.time}</td>
+          <td class="p-3"><span class="font-black text-teal-950 bg-teal-50 px-2.5 py-0.5 rounded-lg border border-teal-200 font-mono">${log.tokenNumber || '001'}</span></td>
+          <td class="p-3">
+            <p class="font-bold text-slate-900">${pName}</p>
+            <p class="text-[10px] text-teal-700 font-mono font-bold">ID: ${pId}</p>
+          </td>
+          <td class="p-3 text-teal-800 font-semibold">${log.doctor}</td>
+          <td class="p-3 text-slate-600">${log.purpose}</td>
+          <td class="p-3 text-center">
+            ${attachedCount > 0 ? `<button type="button" onclick="openHospitalPatientReportsModal('${safeId}', '${safeName}')" class="bg-teal-100 hover:bg-teal-200 text-teal-900 px-3 py-1 rounded-xl text-xs font-extrabold flex items-center justify-center mx-auto space-x-1"><i class="fa-solid fa-folder-open mr-1"></i> <span>${attachedCount} Report${attachedCount > 1 ? 's' : ''}</span></button>` : `<span class="text-[11px] text-slate-400 italic">0 reports</span>`}
+          </td>
+          <td class="p-3 text-center">
+            <div class="flex items-center justify-center space-x-1.5">
+              <button type="button" onclick="openPatientSummaryFromLog('${safeId}', '${safeName}', '${safeDoc}', '${encodeURIComponent(log.purpose || '')}')" class="bg-slate-800 hover:bg-slate-900 text-white px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1 shadow-sm"><i class="fa-solid fa-file-lines mr-1"></i> <span>Summary</span></button>
+              <button type="button" onclick="selectPatientForOpdUpload('${safeId}', '${safeName}', '${safeDoc}')" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1 shadow-sm"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> <span>Upload</span></button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      populateOpdLogsPatientDropdown();
+    }
+
+    function exportLogsCSV() {
+      const hospitalLogs = visitLogs.filter(l => !l.hospital || l.hospital.toLowerCase() === currentHospitalName.toLowerCase());
+      let csv = "Time,Token No,Patient Name,Patient ID,Visit Number,Assigned Doctor,Disease Diagnosis,ABHA ID\n";
+      hospitalLogs.forEach(l => {
+        csv += `"${l.time}","${l.tokenNumber || '001'}","${l.patientName}","${l.patientId || 'N/A'}","${l.visitNum}","${l.doctor}","${l.purpose}","${l.abha}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `OPD_Logs_${currentHospitalName.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+    }
+
+    function readFileOptimized(file) {
+      return new Promise((resolve, reject) => {
+        if (file.type && file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+              const maxDim = 1000;
+              let width = img.width;
+              let height = img.height;
+              if (width > maxDim || height > maxDim) {
+                if (width > height) {
+                  height = Math.round((height * maxDim) / width);
+                  width = maxDim;
+                } else {
+                  width = Math.round((width * maxDim) / height);
+                  height = maxDim;
+                }
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+            img.onerror = () => resolve(e.target.result);
+            img.src = e.target.result;
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        } else {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+
+    function populateOpdLogsPatientDropdown() {
+      const select = document.getElementById('opdLogPatientSelect');
+      if (!select) return;
+      const currentSelected = select.value;
+      const patientMap = new Map();
+
+      const hospitalLogs = visitLogs.filter(l => !l.hospital || l.hospital.toLowerCase() === currentHospitalName.toLowerCase());
+      hospitalLogs.forEach(log => {
+        const id = log.patientId;
+        if (id && !patientMap.has(id)) {
+          patientMap.set(id, { id: id, name: String(log.patientName || '').split(' (')[0] || 'Patient', doctor: log.doctor || 'OPD Consultation' });
+        }
+      });
+
+      (patientBookings || []).filter(b => b.hospital && b.hospital.toLowerCase() === currentHospitalName.toLowerCase()).forEach(b => {
+        const id = b.patientId;
+        if (id && !patientMap.has(id)) {
+          patientMap.set(id, { id: id, name: String(b.patientName || '').replace(/\[EMERGENCY\]/g, '').trim() || 'Patient', doctor: b.doctorName || 'Assigned Doctor' });
+        }
+      });
+
+      select.innerHTML = '<option value="">-- Choose Patient from OPD Logs --</option>';
+      patientMap.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = `${p.name} (${p.id}) — Dr. ${p.doctor}`;
+        opt.dataset.name = p.name;
+        opt.dataset.doctor = p.doctor;
+        select.appendChild(opt);
+      });
+
+      if (currentSelected && patientMap.has(currentSelected)) select.value = currentSelected;
+    }
+
+    function onOpdLogPatientSelectChange(patientId) {
+      const select = document.getElementById('opdLogPatientSelect');
+      const infoStrip = document.getElementById('opdLogPatientInfoStrip');
+      if (!select || !infoStrip) return;
+      if (!patientId) { infoStrip.classList.add('hidden'); return; }
+      const opt = select.options[select.selectedIndex];
+      document.getElementById('opdLogSelectedName').textContent = opt?.dataset?.name || 'Patient';
+      document.getElementById('opdLogSelectedMeta').textContent = `ID: ${patientId}`;
+      document.getElementById('opdLogSelectedDoctor').textContent = `Treating Doctor: ${opt?.dataset?.doctor || 'OPD'}`;
+      infoStrip.classList.remove('hidden');
+    }
+
+    function selectPatientForOpdUpload(patientId, patientName = "", doctorName = "") {
+      switchHospitalTab('logs');
+      populateOpdLogsPatientDropdown();
+      const select = document.getElementById('opdLogPatientSelect');
+      if (select) {
+        if (patientId && !Array.from(select.options).some(o => o.value === patientId)) {
+          const opt = document.createElement('option');
+          opt.value = patientId;
+          opt.textContent = `${patientName || 'Patient'} (${patientId}) — Dr. ${doctorName || 'OPD'}`;
+          opt.dataset.name = patientName || 'Patient';
+          opt.dataset.doctor = doctorName || 'OPD';
+          select.appendChild(opt);
+        }
+        select.value = patientId;
+        onOpdLogPatientSelectChange(patientId);
+      }
+      document.getElementById('opdLogUploadBox')?.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function handleOpdLogsUpload(e) {
+      e.preventDefault();
+      const select = document.getElementById('opdLogPatientSelect');
+      const patientId = select?.value?.trim();
+      const category = document.getElementById('opdLogDocCategory')?.value || 'Diagnostic Report';
+      const fileInput = document.getElementById('opdLogFileInput');
+      const file = fileInput?.files && fileInput.files[0];
+
+      if (!patientId || !file) { alert('Please select both a patient and a diagnostic file to upload.'); return; }
+
+      const submitBtn = document.getElementById('opdLogUploadSubmitBtn');
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="fa-solid fa-bolt mr-1"></i> Saving...'; }
+
+      try {
+        const selectedOpt = select.options[select.selectedIndex];
+        const patientName = selectedOpt?.dataset?.name || 'Patient';
+        const doctorName = selectedOpt?.dataset?.doctor || currentHospitalName;
+        const fileDataUrl = await readFileOptimized(file);
+        const repId = 'rep_' + Date.now();
+
+        const reportData = {
+          id: repId, patientId: patientId, patientName: patientName, category: category,
+          title: `${category} - ${patientName}`, fileName: file.name, fileType: file.type || 'application/pdf',
+          dataUrl: fileDataUrl, fileUrl: fileDataUrl, hospital: currentHospitalName, doctor: doctorName,
+          date: getTodayLocalDate(), uploadedAt: Date.now()
+        };
+
+        patientReports.unshift(reportData);
+        renderHospitalLogs();
+        renderPatientReports();
+
+        const safeId = sanitizeFirebaseKey(patientId);
+        Promise.all([
+          db.ref('reports/' + repId).set(reportData),
+          db.ref('medicalReports/' + safeId + '/' + repId).set(reportData)
+        ]).catch(err => {});
+
+        try {
+          const cached = JSON.parse(localStorage.getItem('ayushcare_reports') || '[]');
+          cached.unshift(reportData);
+          localStorage.setItem('ayushcare_reports', JSON.stringify(cached.slice(0, 50)));
+        } catch (e) {}
+
+        if (fileInput) fileInput.value = '';
+        alert(`⚡ Uploaded Instantly!\n\nPatient: ${patientName} (${patientId})\nDocument: ${file.name}\n\nImmediately visible in patient account Tab 3 (My Medical Reports).`);
+      } catch (err) {
+        alert('Upload error: ' + err.message);
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up mr-2"></i><span>Upload Document & Update Patient Account</span>';
+        }
+      }
+    }
+
+    function openHospitalPatientReportsModal(patientId, patientName) {
+      const list = document.getElementById('hospPatientReportsList');
+      document.getElementById('hospPatientReportsModalSub').textContent = `All reports linked to ${patientName} (${patientId}).`;
+      list.innerHTML = '';
+
+      const matched = patientReports.filter(r => r && String(r.patientId || '').toLowerCase() === String(patientId).toLowerCase());
+      if (!matched.length) {
+        list.innerHTML = `<p class="text-xs text-slate-400 p-4 text-center">No reports uploaded yet.</p>`;
+      } else {
+        matched.forEach(rep => {
+          const div = document.createElement('div');
+          div.className = 'p-3.5 border rounded-2xl bg-slate-50 flex items-center justify-between gap-3';
+          const safeId = String(rep.id || '').replace(/'/g, "\\'");
+          div.innerHTML = `
+            <div><span class="bg-teal-100 text-teal-900 text-[10px] font-bold px-2 py-0.5 rounded-full">${rep.category}</span><h5 class="font-bold text-xs text-slate-800 mt-1">${rep.fileName}</h5></div>
+            <button onclick="viewPatientReport('${safeId}')" class="bg-teal-700 text-white px-3 py-1 rounded-xl text-xs font-bold">View</button>`;
+          list.appendChild(div);
+        });
+      }
+      showModalFlex('hospitalPatientReportsModal');
+    }
+
+    function renderHospitalRoster() {
+      const list = document.getElementById('hospitalDoctorRosterList');
+      const countBadge = document.getElementById('rosterCountBadge');
+      if (!list) return;
+      list.innerHTML = '';
+
+      const hospitalDocs = doctors.filter(d => String(d.hospital || '').toLowerCase() === currentHospitalName.toLowerCase());
+      if (countBadge) countBadge.textContent = hospitalDocs.length;
+
+      if (!hospitalDocs.length) {
+        list.innerHTML = `<p class="text-xs text-slate-400 col-span-2">No doctors currently registered under ${currentHospitalName}.</p>`;
+        return;
+      }
+
+      hospitalDocs.forEach(d => {
+        const row = document.createElement('div');
+        row.className = "flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100";
+        row.innerHTML = `
+          <div class="flex items-center space-x-2.5">
+            <img src="${d.photo}" class="w-10 h-10 rounded-full object-cover border" />
+            <div>
+              <p class="font-bold text-slate-800">${d.name}</p>
+              <p class="text-[10px] text-teal-700 font-semibold">${d.dept}</p>
+              <p class="text-[10px] text-slate-400">${d.room}</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-1.5">
+            <button onclick="toggleDoctorStatus('${d.id}')" class="text-[10px] px-2.5 py-1 rounded-lg font-bold transition ${d.status === 'Available' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+              ${d.status}
+            </button>
+            <button onclick="deleteDoctor('${d.id}')" title="Remove Doctor" class="text-rose-600 hover:text-rose-800 p-1.5 rounded-lg text-xs">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    function populateDoctorSelect() {
+      const select = document.getElementById('logDoctorSelect');
+      if (!select) return;
+      select.innerHTML = '';
+      doctors.filter(d => d.status === 'Available' && d.hospital.toLowerCase() === currentHospitalName.toLowerCase()).forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = `${d.name} (${d.dept} - ${d.hospital})`;
+        opt.textContent = `${d.name} (${d.dept})`;
+        select.appendChild(opt);
+      });
+    }
+
+    async function addNewDoctor(e) {
+      e.preventDefault();
+      const name = document.getElementById('docName').value.trim();
+      const hospital = (document.getElementById('docHospitalName').value || currentHospitalName).trim();
+      const dept = document.getElementById('docDept').value;
+      const status = document.getElementById('docStatus').value;
+      const room = document.getElementById('docRoom').value.trim() || 'OPD Chamber';
+      const fileInput = document.getElementById('docPhotoInput');
+
+      if (!name || !hospital) return;
+
+      let photoUrl = 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=150&auto=format&fit=crop&q=80';
+      if (fileInput.files && fileInput.files[0]) {
+        photoUrl = URL.createObjectURL(fileInput.files[0]);
+      }
+
+      const docId = 'doc_' + Date.now();
+      const newDoc = { id: docId, name, hospital, dept, status, room, photo: photoUrl, createdAt: Date.now() };
+
+      try {
+        await db.ref('doctors/' + docId).set(newDoc);
+        renderHospitalRoster();
+        renderPatientDoctors();
+        populateDoctorSelect();
+        alert(`Doctor ${name} registered successfully.`);
+        document.getElementById('docName').value = '';
+        document.getElementById('docRoom').value = '';
+      } catch (error) {
+        alert('Could not register doctor: ' + error.message);
+      }
+    }
+
+    function downloadSelf() {
+      const htmlContent = document.documentElement.outerHTML;
+      const blob = new Blob([htmlContent], { type: 'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'final_main_13-9-26.html';
+      a.click();
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      try { window.history.replaceState({ screen: 'auth', tab: 1, modal: null }, document.title, window.location.href); } catch (e) {}
+      await initializeCleanDatabase();
+
+      try {
+        const usersSnap = await db.ref('users').once('value');
+        registeredUsers = usersSnap.val() ? Object.values(usersSnap.val()) : [];
+      } catch (e) {}
+
+      const savedSession = localStorage.getItem('ayushcare_session');
+      if (savedSession) {
+        try {
+          const sessionUser = JSON.parse(savedSession);
+          const match = registeredUsers.find(u => u.email === sessionUser.email && u.role === sessionUser.role);
+          if (match) { currentLoggedUser = match; launchPortal(match); }
+          else { localStorage.removeItem('ayushcare_session'); }
+        } catch (e) { localStorage.removeItem('ayushcare_session'); }
+      }
+      renderPatientDoctors();
+      renderPatientReports();
+      renderHospitalBookings();
+      renderHospitalRoster();
+      renderHospitalLogs();
+      populateDoctorSelect();
+      updatePatientDisplayName();
+    });
+  </script>
+</body>
+</html>
